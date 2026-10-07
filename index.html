@@ -80,7 +80,7 @@ textarea{width:100%;min-height:120px;border:1px solid var(--line);border-radius:
 .mrow .bar{height:10px;border-radius:5px;background:var(--line);overflow:hidden}
 .mrow .bar div{height:100%;background:var(--accent);border-radius:5px}
 .irow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 0;border-top:1px solid var(--line)}
-.irow .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.irow .t{overflow-wrap:anywhere}
 .irow .note{grid-column:1/-1}
 select{font:inherit;font-size:.88rem;border:1px solid var(--line);border-radius:8px;padding:5px 8px;background:var(--bg);color:var(--ink);max-width:100%}
 .badge{font-size:.75rem;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
@@ -90,7 +90,7 @@ select{font:inherit;font-size:.88rem;border:1px solid var(--line);border-radius:
 .tx{display:grid;grid-template-columns:auto 1fr auto;gap:10px;padding:10px 0;border-top:1px solid var(--line);align-items:center}
 .tx .d{font-size:.8rem;color:var(--muted);width:3.6em}
 .tx .desc{min-width:0}
-.tx .desc .t{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx .desc .t{display:block;overflow-wrap:anywhere}
 .tx .c{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;font-size:.78rem;color:var(--muted)}
 .tx .c select{font-size:.8rem;padding:3px 6px}
 .tx .in{color:var(--in)}
@@ -385,8 +385,8 @@ function parseCardList(text){
       if(!fold(line).replace(CARD_NOISE,'').trim()||/^\d{1,2}:\d{2}$|^\d{1,5}$/.test(line)) continue;
       const d=line.match(DATE_ONLY);
       if(d){if(cur&&!cur.date){cur.date=new Date(+d[3],+d[2]-1,+d[1]);if(d[4]){cur.inst=true;cur.k=+d[4];cur.rem=Math.max(0,+d[5]-+d[4]);}}continue;}
-      const a=line.match(TL_AMT), txt=(a?line.slice(0,a.index):line).replace(/(\.\.\.|…)$/,'').trim();
-      if(/[A-Za-zÇĞİÖŞÜçğıöşü]{2}/.test(txt)){done();cur={desc:txt,amt:null,date:null};}
+      const a=line.match(TL_AMT), raw=(a?line.slice(0,a.index):line).trim(), txt=raw.replace(/\s*(\.{2,}|…)$/,'').trim();
+      if(/[A-Za-zÇĞİÖŞÜçğıöşü]{2}/.test(txt)){done();cur={desc:txt,amt:null,date:null,trunc:txt!==raw};}
       if(a&&cur&&cur.amt==null){const v=parseFloat(a[2].replace(/\./g,'').replace(',','.'));cur.amt=a[1]?-v:v;}
     }
     done();
@@ -394,7 +394,7 @@ function parseCardList(text){
     // başıyla aynı olan son kısmı at (görüntüler hangi sırayla seçilirse seçilsin).
     let head=0,tail=0;
     for(const P of prev){head=Math.max(head,overlap(P,recs));tail=Math.max(tail,overlap(recs,P));}
-    recs.slice(head,Math.max(head,recs.length-tail)).forEach(r=>out.push({date:r.date,desc:r.desc,amt:r.amt,credit:r.amt<0,inst:!!r.inst,check:!!r.check,rem:r.rem!=null?{amt:Math.abs(r.amt),n:r.rem,k:r.k}:null}));
+    recs.slice(head,Math.max(head,recs.length-tail)).forEach(r=>out.push({date:r.date,desc:r.desc,trunc:!!r.trunc,amt:r.amt,credit:r.amt<0,inst:!!r.inst,check:!!r.check,rem:r.rem!=null?{amt:Math.abs(r.amt),n:r.rem,k:r.k}:null}));
     if(recs.length) prev.push(recs);
   }
   out.card=true;
@@ -524,6 +524,9 @@ function addRaw(raw){
   }
   const existing={}; txs.forEach(t=>existing[t.id]=(existing[t.id]||0)+1);
   const batch={}; let added=0;
+  // Banka uygulaması uzun isimleri "…" ile keser: aynı yer yüklü bir ekstrede geçiyorsa tam ismi al.
+  const sq=x=>fold(x).replace(/[^A-Z0-9]/g,'');
+  for(const r of raw) if(r.trunc){const k=sq(r.desc), full=k.length>=6&&txs.concat(raw).find(t=>!t.trunc&&!t.card&&sq(t.desc).startsWith(k)&&sq(t.desc).length>k.length);if(full){r.desc=full.desc;r.trunc=false;}}
   for(const r of raw){
     const f=fold(r.desc);
     let date=r.date, inst=!!r.inst||/TAKSIT/.test(f);
