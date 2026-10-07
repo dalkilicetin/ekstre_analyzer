@@ -362,8 +362,9 @@ function looksEbcdic(strs){
 
 /* Banka uygulamasının ekran görüntülerinden (iPhone metin tanıma) gelen kart listesi:
    açıklama, "250,00 TL", "27.09.2026", puan ayrı satırlarda. Görüntüler "=====" ile ayrılır. */
-const CARD_NOISE=/CHIP-PARA ILE ODE|DONEM ICI|BEKLEYEN|GELECEK DONEM|KREDI KARTI|ANA SAYFA|TRANSFER VE ODEMELER|BASVURULAR|SENIN ICIN/g;
-const DATE_ONLY=/^(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\s+\d{1,5})?$/;
+const CARD_NOISE=/CHIP-PARA ILE ODE|MIL ILE ODE|DAHA FAZLA|DONEM ICI|BEKLEYEN|GELECEK DONEM|KREDI KARTI|ANA SAYFA|TRANSFER VE ODEMELER|BASVURULAR|SENIN ICIN/g;
+// Tarih satırı: "28.09.2026", "28.09.2026 - Taksit: 06/06" ya da yanında puan/chip-para ("28.09.2026 98 1,23 TL").
+const DATE_ONLY=/^(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\s*[-–]\s*Taksit:?\s*(\d{1,2})\s*\/\s*(\d{1,2})|[\s\d.,]*(?:TL|₺)?)$/i;
 const TL_AMT=/([+\-−–]?)\s?(\d{1,3}(?:\.\d{3})*,\d{2})\s*(?:TL|₺)$/;
 function looksCardList(lines){
   return lines.filter(l=>DATE_ONLY.test(l.trim())).length>=1&&lines.filter(l=>TL_AMT.test(l.trim())).length>=1;
@@ -377,7 +378,7 @@ function parseCardList(text){
       line=line.replace(/\s+/g,' ').trim();
       if(!fold(line).replace(CARD_NOISE,'').trim()||/^\d{1,2}:\d{2}$|^\d{1,5}$/.test(line)) continue;
       const d=line.match(DATE_ONLY);
-      if(d){if(cur&&!cur.date)cur.date=new Date(+d[3],+d[2]-1,+d[1]);continue;}
+      if(d){if(cur&&!cur.date){cur.date=new Date(+d[3],+d[2]-1,+d[1]);if(d[4]){cur.inst=true;cur.k=+d[4];cur.rem=Math.max(0,+d[5]-+d[4]);}}continue;}
       const a=line.match(TL_AMT), txt=(a?line.slice(0,a.index):line).replace(/(\.\.\.|…)$/,'').trim();
       if(/[A-Za-zÇĞİÖŞÜçğıöşü]{2}/.test(txt)){done();cur={desc:txt,amt:null,date:null};}
       if(a&&cur&&cur.amt==null){const v=parseFloat(a[2].replace(/\./g,'').replace(',','.'));cur.amt=a[1]?-v:v;}
@@ -387,9 +388,10 @@ function parseCardList(text){
     const k=r=>r.date.getTime()+'|'+r.desc+'|'+r.amt;
     let skip=0;
     for(let m=Math.min(prev.length,recs.length);m>0;m--){if(recs.slice(0,m).every((r,i)=>k(r)===k(prev[prev.length-m+i]))){skip=m;break;}}
-    recs.slice(skip).forEach(r=>out.push({date:r.date,desc:r.desc,amt:r.amt,credit:r.amt<0,rem:null}));
+    recs.slice(skip).forEach(r=>out.push({date:r.date,desc:r.desc,amt:r.amt,credit:r.amt<0,inst:!!r.inst,rem:r.rem!=null?{amt:Math.abs(r.amt),n:r.rem,k:r.k}:null}));
     if(recs.length) prev=recs;
   }
+  out.card=true;
   return out;
 }
 
@@ -457,12 +459,18 @@ async function parseExcel(file){
 
 function addRaw(raw){
   if(!raw.length){setStatus('İşlem satırı bulunamadı. Dosya taranmış görüntü olabilir; işlem satırlarını kopyalayıp "Metin yapıştır" ile dene.',true);return 0;}
-  const account=raw.filter(r=>r.amt<0).length>raw.length*0.5;
+  const account=!raw.card&&raw.filter(r=>r.amt<0).length>raw.length*0.5;
+  // Dönem içi liste: dönem sonu, yüklü son ekstrenin kesim gününden bir ay sonrası (yoksa ilk işlemden bir ay sonrası).
+  if(raw.card&&!raw.periodEnd){
+    const min=new Date(Math.min(...raw.map(r=>r.date.getTime()))), pe=Math.max(0,...txs.filter(t=>!t.card).map(t=>t.stmt));
+    const P=pe&&min>pe?new Date(pe):null;
+    raw.periodEnd=P?new Date(P.getFullYear(),P.getMonth()+1,P.getDate()):new Date(min.getFullYear(),min.getMonth()+1,min.getDate()-1);
+  }
   const existing={}; txs.forEach(t=>existing[t.id]=(existing[t.id]||0)+1);
   const batch={}; let added=0;
   for(const r of raw){
     const f=fold(r.desc);
-    let date=r.date, inst=/TAKSIT/.test(f);
+    let date=r.date, inst=!!r.inst||/TAKSIT/.test(f);
     if(raw.period&&inst&&date<raw.period) date=raw.period;
     const id=date.getTime()+'|'+r.desc+'|'+r.amt;
     batch[id]=(batch[id]||0)+1; if(batch[id]<=(existing[id]||0)) continue;
@@ -471,7 +479,7 @@ function addRaw(raw){
     // "Fatura ödeme" gibi borç satırları harcamadır; kart ödemesi yalnızca alacak (-) satırıdır.
     else if(r.credit||r.amt<0) type=(PAY_RE.test(f)&&!REFUND_RE.test(f))?'in':'refund';
     else type=/TESEKKUR/.test(f)?'in':'out';
-    txs.push({id,date,desc:r.desc,amount:Math.abs(r.amt),type,inst,key:merchantKey(r.desc),rem:r.rem||null,stmt:raw.periodEnd?raw.periodEnd.getTime():0});
+    txs.push({id,date,desc:r.desc,amount:Math.abs(r.amt),type,inst,key:merchantKey(r.desc),rem:r.rem||null,stmt:raw.periodEnd?raw.periodEnd.getTime():0,card:!!raw.card});
     added++;
   }
   txs.sort((a,b)=>b.date-a.date);
@@ -634,22 +642,27 @@ function render(){
 }
 const monthFmt=new Intl.DateTimeFormat('tr-TR',{month:'long',year:'numeric'});
 function renderInst(){
-  const all=txs.filter(t=>t.rem&&t.rem.n>0), ip=$('#instPanel');
-  if(!all.length){ip.classList.add('hidden');return;}
+  // Temel: en yeni ekstre (PDF). Dönem içi listeden yalnızca bu dönemde başlayan taksitler (01/N) eklenir;
+  // süren taksitler ekstrede zaten var. Ekstre yüklü değilse dönem içi listenin tamamı kullanılır.
+  const st=txs.filter(t=>t.rem&&!t.card), cd=txs.filter(t=>t.rem&&t.card);
+  const ls=st.length?Math.max(...st.map(t=>t.stmt)):0, lc=cd.length?Math.max(...cd.map(t=>t.stmt)):0;
+  const items=st.filter(t=>t.stmt===ls&&t.rem.n>0).concat(cd.filter(t=>t.stmt===lc&&t.rem.n>0&&(!ls||t.rem.k===1)));
+  const ip=$('#instPanel');
+  if(!items.length){ip.classList.add('hidden');return;}
   ip.classList.remove('hidden');
-  // Birden fazla ekstre yüklüyse kalan taksitler en yeni ekstreden okunur (yoksa iki kez sayılır).
-  const latest=Math.max(...all.map(t=>t.stmt)), items=all.filter(t=>t.stmt===latest);
-  const base=latest?new Date(latest):new Date(Math.max(...items.map(t=>t.date.getTime())));
-  const sg=t=>t.type==='refund'?-1:1, maxN=Math.max(...items.map(t=>t.rem.n));
-  const months=[]; for(let k=1;k<=maxN;k++){const its=items.filter(t=>t.rem.n>=k);months.push({d:new Date(base.getFullYear(),base.getMonth()+k,1),v:its.reduce((s,t)=>s+sg(t)*t.rem.amt,0),n:its.length});}
+  const base=t=>new Date(t.stmt||Math.max(...items.map(x=>x.date.getTime())));
+  const mon=(t,k)=>{const b=base(t);return new Date(b.getFullYear(),b.getMonth()+k,1);};
+  const sg=t=>t.type==='refund'?-1:1, by=new Map();
+  for(const t of items)for(let k=1;k<=t.rem.n;k++){const d=mon(t,k),key=d.getTime(),m=by.get(key)||{d,v:0,n:0};m.v+=sg(t)*t.rem.amt;m.n++;by.set(key,m);}
+  const months=[...by.values()].sort((a,b)=>a.d-b.d);
   const total=items.reduce((s,t)=>s+sg(t)*t.rem.amt*t.rem.n,0), peak=Math.max(1,...months.map(m=>m.v));
   $('#instTotal').textContent=fmt0.format(total);
-  $('#instSub').textContent=`önümüzdeki ${maxN} ayda ödenecek`;
+  $('#instSub').textContent=`önümüzdeki ${months.length} ayda ödenecek`;
   $('#instMonths').innerHTML=months.map(m=>`<div class="mrow"><span>${esc(monthFmt.format(m.d))}</span>
     <span class="bar" title="${m.n} taksit"><div style="width:${Math.max(0,m.v)/peak*100}%"></div></span><span class="num">${fmt.format(m.v)}</span></div>`).join('');
   $('#instItems').innerHTML=items.slice().sort((a,b)=>sg(b)*b.rem.amt*b.rem.n-sg(a)*a.rem.amt*a.rem.n).map(t=>`<div class="irow">
     <span class="t">${esc(t.desc)}</span><span class="num">${t.type==='refund'?'−':''}${fmt.format(t.rem.amt*t.rem.n)}</span>
-    <span class="note">${t.type==='refund'?'İade · ':''}aylık ${fmt.format(t.rem.amt)} × ${t.rem.n} ay kaldı · son taksit ${esc(monthFmt.format(new Date(base.getFullYear(),base.getMonth()+t.rem.n,1)))}</span></div>`).join('');
+    <span class="note">${t.type==='refund'?'İade · ':''}aylık ${fmt.format(t.rem.amt)} × ${t.rem.n} ay kaldı · son taksit ${esc(monthFmt.format(mon(t,t.rem.n)))}</span></div>`).join('');
 }
 function catSelect(t){
   const k=esc(t.key), d=esc(t.desc), ci=t.ci;
