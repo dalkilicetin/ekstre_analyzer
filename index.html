@@ -289,25 +289,50 @@ function setRule(key,desc,cat){
 let txs=[];let filterCat=null;let showAllMerch=false;
 
 /* ---------- Ayrıştırma ---------- */
-const DATE_RE=/^(\d{2})[./-](\d{2})[./-](\d{4}|\d{2})(?!\d)\s*(.*)$/;
+// Satır başındaki tarih; önünde harf olmayan ön ek (sıra no, kart no, saat) olabilir.
+const DATE_RE=/^(?:[^A-Za-zÇĞİÖŞÜçğıöşü]*?[^A-Za-zÇĞİÖŞÜçğıöşü\d])??(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?!\d)\s*(.*)$/;
+const MONTHS={OCAK:1,OCA:1,SUBAT:2,SUB:2,MART:3,MAR:3,NISAN:4,NIS:4,MAYIS:5,MAY:5,HAZIRAN:6,HAZ:6,TEMMUZ:7,TEM:7,AGUSTOS:8,AGU:8,AGS:8,EYLUL:9,EYL:9,EKIM:10,EKI:10,KASIM:11,KAS:11,ARALIK:12,ARA:12};
+const DATE_TXT_RE=/^(?:[^A-Z]*?[^A-Z\d])??(\d{1,2})\s+([A-Z]{3,7})\.?\s+(\d{4})(?!\d)\s*/;
 const AMT_RE=/([+-])?\s?(\d{1,3}(?:[.,]\d{3})+|\d+)[.,](\d{2})(?!\d)(\s?\(\s?-\s?\)|\s?[+-](?![\d]))?/g;
 const PAY_RE=/ODEMENIZ|ODEME|TESEKKUR/;
 const REFUND_RE=/IADE|IPTAL/;
 const PERIOD_RE=/(\d{2})[./](\d{2})[./](\d{4})\s*-\s*(\d{2})[./](\d{2})[./](\d{4})/;
 
+// Satır tarihle başlıyorsa {date, rest} döner; rest'te saat ve ikinci (valör) tarihi atılmıştır.
+function lineDate(line){
+  const fl=fold(line);
+  let m=line.match(DATE_RE);
+  if(!m&&fl.length===line.length){const t=fl.match(DATE_TXT_RE);if(t&&MONTHS[t[2]])m=[t[0],t[1],MONTHS[t[2]],t[3],line.slice(t[0].length)];}
+  if(!m) return null;
+  let y=+m[3]; if(y<100) y+=2000;
+  const mo=+m[2], da=+m[1]; if(mo<1||mo>12||da<1||da>31||y<2000||y>2100) return null;
+  return {date:new Date(y,mo-1,da),rest:m[4].replace(/^\d{2}:\d{2}(:\d{2})?\s*/,'').replace(/^\d{2}[./]\d{2}[./]\d{2,4}\s*/,'')};
+}
+const maskParen=s=>s.replace(/\(\s*[\d.,]+\s*(TL|TRY|USD|EUR|GBP)?\s*\)/gi,m=>' '.repeat(m.length));
+const hasAmt=s=>{AMT_RE.lastIndex=0;return AMT_RE.test(maskParen(s));};
+// Tablo hücresi iki satıra taşınca tarih bir satırda, tutar alttakinde kalır: tutar bulunana kadar birleştir.
+function joinRows(lines){
+  const out=[];
+  lines=lines.map(l=>String(l).replace(/\s+/g,' ').trim()).filter(Boolean);
+  for(let i=0;i<lines.length;i++){
+    let l=lines[i]; const d=lineDate(l);
+    if(d&&!hasAmt(d.rest)){
+      let j=i+1;
+      while(j<lines.length&&j<=i+3&&!lineDate(lines[j])){l+=' '+lines[j];j++;if(hasAmt(lineDate(l).rest))break;}
+      if(hasAmt(lineDate(l).rest)) i=j-1; else l=lines[i];
+    }
+    out.push(l);
+  }
+  return out;
+}
+
 function parseLines(lines){
   const out=[];out.period=null;
-  for(let line of lines){
-    line=String(line).replace(/\s+/g,' ').trim();
+  for(const line of joinRows(lines)){
     const fl=fold(line);
     if(!out.period&&/EKSTRE DONEM|HESAP DONEM/.test(fl)){const p=fl.match(PERIOD_RE);if(p)out.period=new Date(+p[3],+p[2]-1,+p[1]);}
-    const m=line.match(DATE_RE); if(!m) continue;
-    let y=+m[3]; if(y<100) y+=2000;
-    const mo=+m[2], da=+m[1]; if(mo<1||mo>12||da<1||da>31) continue;
-    const date=new Date(y,mo-1,da);
-    let rest=m[4].replace(/^\d{2}:\d{2}(:\d{2})?\s*/,'').replace(/^\d{2}[./]\d{2}[./]\d{2,4}\s*/,'');
-    const descSrc=rest;
-    rest=rest.replace(/\(\s*[\d.,]+\s*(TL|TRY|USD|EUR|GBP)?\s*\)/gi,m=>' '.repeat(m.length));
+    const ld=lineDate(line); if(!ld) continue;
+    const date=ld.date, descSrc=ld.rest, rest=maskParen(ld.rest);
     AMT_RE.lastIndex=0;
     let a=AMT_RE.exec(rest); if(!a) continue;
     const after=rest.slice(a.index+a[0].length).trimStart();
@@ -331,11 +356,12 @@ async function pdfLines(file){
   const pdf=await task.promise; const lines=[];
   for(let p=1;p<=pdf.numPages;p++){
     const tc=await (await pdf.getPage(p)).getTextContent();
-    const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>({x:i.transform[4],y:i.transform[5],s:i.str}))
+    const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>({x:i.transform[4],y:i.transform[5],h:Math.abs(i.height||i.transform[3])||8,s:i.str}))
       .sort((a,b)=>b.y-a.y||a.x-b.x);
-    let row=[],ry=null;
+    // Tablo hücrelerinde aynı satırın parçaları farklı yükseklikte durabilir: tolerans yazı boyuna göre.
+    let row=[],ry=null,rh=8;
     const flush=()=>{if(row.length)lines.push(row.sort((a,b)=>a.x-b.x).map(o=>o.s).join(' '));row=[];};
-    for(const it of items){ if(ry===null||Math.abs(it.y-ry)>3){flush();ry=it.y;} row.push(it); }
+    for(const it of items){ if(ry===null||Math.abs(it.y-ry)>Math.max(3,Math.min(rh,it.h)*0.6)){flush();ry=it.y;rh=it.h;} row.push(it); }
     flush();
   }
   return lines;
@@ -402,12 +428,16 @@ function addRaw(raw){
 function setStatus(msg,err){const s=$('#status');s.textContent=msg;s.className=err?'err':'';}
 async function handleFiles(files){
   if(!files.length) return;
-  setStatus('Okunuyor…'); let added=0; const fails=[];
+  setStatus('Okunuyor…'); let added=0; const fails=[]; let unread=null;
   for(const f of files){
     const n=f.name.toLowerCase();
     try{
       let raw;
-      if(n.endsWith('.pdf')||f.type==='application/pdf'){ if(!window.pdfjsLib) throw new Error('PDF okuyucu yüklenemedi'); raw=parseLines(await pdfLines(f)); }
+      if(n.endsWith('.pdf')||f.type==='application/pdf'){
+        if(!window.pdfjsLib) throw new Error('PDF okuyucu yüklenemedi');
+        const lines=await pdfLines(f); raw=parseLines(lines);
+        if(!raw.length) unread=lines;
+      }
       else if(/\.xlsx?$/.test(n)){ if(!window.XLSX) throw new Error('Excel okuyucu yüklenemedi'); raw=await parseExcel(f); }
       else raw=parseLines((await f.text()).split(/\r?\n/));
       added+=addRaw(raw);
@@ -415,6 +445,12 @@ async function handleFiles(files){
   }
   if(txs.length){setStatus(added+' işlem eklendi.'+(fails.length?' Okunamayan: '+fails.join(', '):''),!!fails.length);render();}
   else if(fails.length) setStatus('Okunamadı: '+fails.join(', '),true);
+  // PDF açıldı ama işlem çıkmadı: okunan metni yapıştırma kutusuna koy (yalnızca bu sayfada kalır).
+  if(!added&&unread){
+    if(!unread.join('').trim()){setStatus('PDF\'te okunabilir metin yok; taranmış görüntü olabilir. İşlem satırlarını kopyalayıp "Metin yapıştır" ile dene.',true);return;}
+    $('#pasteText').value=unread.join('\n'); $('#pasteBox').classList.remove('hidden');
+    setStatus('PDF okundu ama işlem satırlarını tanıyamadım. Okunan metni aşağıdaki kutuya koydum: işlem satırlarını "GG/AA/YYYY açıklama tutar" biçimine getirip "Analiz et"e bas.',true);
+  }
 }
 $('#file').addEventListener('change',e=>{handleFiles([...e.target.files]);e.target.value='';});
 const drop=$('#drop');
