@@ -360,6 +360,39 @@ function looksEbcdic(strs){
   return e>=20&&e>a*3;
 }
 
+/* Banka uygulamasının ekran görüntülerinden (iPhone metin tanıma) gelen kart listesi:
+   açıklama, "250,00 TL", "27.09.2026", puan ayrı satırlarda. Görüntüler "=====" ile ayrılır. */
+const CARD_NOISE=/CHIP-PARA ILE ODE|DONEM ICI|BEKLEYEN|GELECEK DONEM|KREDI KARTI|ANA SAYFA|TRANSFER VE ODEMELER|BASVURULAR|SENIN ICIN/g;
+const DATE_ONLY=/^(\d{1,2})[./](\d{1,2})[./](\d{4})(?:\s+\d{1,5})?$/;
+const TL_AMT=/([+\-−–]?)\s?(\d{1,3}(?:\.\d{3})*,\d{2})\s*(?:TL|₺)$/;
+function looksCardList(lines){
+  return lines.filter(l=>DATE_ONLY.test(l.trim())).length>=1&&lines.filter(l=>TL_AMT.test(l.trim())).length>=1;
+}
+function parseCardList(text){
+  const out=[];out.period=null; let prev=[];
+  for(const chunk of text.split(/^\s*={3,}\s*$/m)){
+    const recs=[]; let cur=null;
+    const done=()=>{if(cur&&cur.amt!=null&&cur.date)recs.push(cur);cur=null;};
+    for(let line of chunk.split(/\r?\n/)){
+      line=line.replace(/\s+/g,' ').trim();
+      if(!fold(line).replace(CARD_NOISE,'').trim()||/^\d{1,2}:\d{2}$|^\d{1,5}$/.test(line)) continue;
+      const d=line.match(DATE_ONLY);
+      if(d){if(cur&&!cur.date)cur.date=new Date(+d[3],+d[2]-1,+d[1]);continue;}
+      const a=line.match(TL_AMT), txt=(a?line.slice(0,a.index):line).replace(/(\.\.\.|…)$/,'').trim();
+      if(/[A-Za-zÇĞİÖŞÜçğıöşü]{2}/.test(txt)){done();cur={desc:txt,amt:null,date:null};}
+      if(a&&cur&&cur.amt==null){const v=parseFloat(a[2].replace(/\./g,'').replace(',','.'));cur.amt=a[1]?-v:v;}
+    }
+    done();
+    // Art arda görüntüler çakışır: önceki görüntünün sonu bu görüntünün başıyla aynıysa o kısmı at.
+    const k=r=>r.date.getTime()+'|'+r.desc+'|'+r.amt;
+    let skip=0;
+    for(let m=Math.min(prev.length,recs.length);m>0;m--){if(recs.slice(0,m).every((r,i)=>k(r)===k(prev[prev.length-m+i]))){skip=m;break;}}
+    recs.slice(skip).forEach(r=>out.push({date:r.date,desc:r.desc,amt:r.amt,credit:r.amt<0,rem:null}));
+    if(recs.length) prev=recs;
+  }
+  return out;
+}
+
 async function pdfLines(file){
   const task=pdfjsLib.getDocument({data:await file.arrayBuffer(),isEvalSupported:false,disableFontFace:true});
   task.onPassword=(update,reason)=>{
@@ -479,7 +512,7 @@ const drop=$('#drop');
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
 drop.addEventListener('drop',e=>handleFiles([...e.dataTransfer.files]));
 $('#pasteToggle').onclick=()=>$('#pasteBox').classList.toggle('hidden');
-$('#pasteGo').onclick=()=>{const n=addRaw(parseLines($('#pasteText').value.split(/\r?\n/)));if(n){setStatus(n+' işlem eklendi.');$('#pasteText').value='';render();}};
+$('#pasteGo').onclick=()=>{const t=$('#pasteText').value, L=t.split(/\r?\n/);const n=addRaw(looksCardList(L)?parseCardList(t):parseLines(L));if(n){setStatus(n+' işlem eklendi.');$('#pasteText').value='';render();}};
 $('#addMore').onclick=()=>$('#inputPanel').scrollIntoView({behavior:'smooth'});
 $('#reset').onclick=()=>{txs=[];filterCat=null;$('#results').classList.add('hidden');setStatus('Ekstre verileri silindi. Öğrendiklerim duruyor.');};
 $('#search').addEventListener('input',renderTx);
