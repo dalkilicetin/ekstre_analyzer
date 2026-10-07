@@ -1,6 +1,6 @@
 // Ekstre Analiz – çevrimdışı önbellek.
 // index.html'i ya da başka bir dosyayı güncellediğinde aşağıdaki sürümü bir artır (v2, v3...).
-const VERSION = 'ekstre-v8';
+const VERSION = 'ekstre-v9';
 // Fotoğraf okuyucu dosyaları (~8 MB) ilk kullanımda indirilir ve sürüm değişse de silinmez.
 const OCR_CACHE = 'ekstre-ocr-v1';
 const FILES = [

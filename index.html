@@ -94,8 +94,12 @@ select{font:inherit;font-size:.88rem;border:1px solid var(--line);border-radius:
 .tx .c{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;font-size:.78rem;color:var(--muted)}
 .tx .c select{font-size:.8rem;padding:3px 6px}
 .tx .in{color:var(--in)}
-.tx.chk .num{color:var(--warn)}
-.fix{display:block;margin-top:4px;border-color:var(--warn);color:var(--warn)}
+.tx.chk>.num{color:var(--warn)}
+.fix{display:block;margin:4px 0 0 auto;padding:2px 10px;font-size:.75rem;color:var(--muted)}
+.fix.warn{border-color:var(--warn);color:var(--warn)}
+.fixbox{grid-column:1/-1;display:flex;gap:6px;justify-content:flex-end;align-items:center}
+.fixbox input{width:7.5em;font:inherit;font-size:.9rem;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);text-align:right}
+.fixbox input.bad{border-color:var(--warn)}
 .search{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg);color:var(--ink);font:inherit;margin-bottom:6px}
 .toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .filter-tag{font-size:.85rem;color:var(--accent);background:none;border:none;padding:4px 0}
@@ -744,17 +748,27 @@ function renderTx(){
   const ctl=t=>t.type==='in'?'Kart ödemesi':catSelect(t)+`<span class="badge ${t.ci.src}">${SRC[t.ci.src]}</span>`+(t.type==='refund'?'<span>iade</span>':'')+(t.inst?'<span>taksit</span>':'');
   $('#txList').innerHTML=shown.map(t=>`<div class="tx${t.check?' chk':''}"><span class="d num">${dShort.format(t.date)}</span>
     <span class="desc"><span class="t">${esc(t.desc)}</span><span class="c">${ctl(t)}</span></span>
-    <span class="num ${t.type!=='out'?'in':''}">${t.type==='out'?'':(t.type==='refund'?'−':'+')}${fmt.format(t.amount)}${t.check?`<button class="small fix" data-i="${txs.indexOf(t)}">tutarı kontrol et</button>`:''}</span></div>`).join('')
+    <span class="num ${t.type!=='out'?'in':''}">${t.type==='out'?'':(t.type==='refund'?'−':'+')}${fmt.format(t.amount)}${t.card?`<button class="small fix${t.check?' warn':''}" data-i="${txs.indexOf(t)}">${t.check?'tutarı kontrol et':'düzelt'}</button>`:''}</span></div>`).join('')
     +(list.length>shown.length?`<p class="note" style="margin-top:10px">İlk 300 işlem gösteriliyor (toplam ${list.length}). Aramayla daralt.</p>`:'')
     +(!list.length?'<p class="note" style="margin-top:10px">Eşleşen işlem yok.</p>':'');
   bindSelects($('#txList'));
-  // Fotoğraftan okunan ve iki okumanın uyuşmadığı tutar: kullanıcı ekran görüntüsüne bakıp düzeltir.
+  // Fotoğraftan okunan tutar yanlışsa kullanıcı ekran görüntüsüne bakıp satırın içinde düzeltir.
   $('#txList').querySelectorAll('button.fix').forEach(b=>b.onclick=()=>{
-    const t=txs[+b.dataset.i]; if(!t) return;
-    const v=prompt(`${t.desc}\nEkran görüntüsündeki tutarı yaz (ör. 1.234,56):`,fmtCents(Math.round(t.amount*100)).replace('-',''));
-    if(v===null) return; const c=ocrCents(v.trim()+' TL'); if(c==null){alert('Tutar anlaşılamadı. Örnek: 1.234,56');return;}
-    t.amount=Math.abs(c)/100; t.check=false; render();
+    const t=txs[+b.dataset.i], row=b.closest('.tx'); if(!t||row.querySelector('.fixbox')) return;
+    const box=document.createElement('span'); box.className='fixbox';
+    box.innerHTML=`<input inputmode="decimal" aria-label="Doğru tutar" value="${fmtCents(Math.round(t.amount*100)).replace('-','')}"><button class="small primary">Kaydet</button><button class="small">Vazgeç</button>`;
+    const [inp,ok,no]=box.children; b.remove(); row.appendChild(box); inp.focus(); inp.select();
+    const save=()=>{const v=parseUserAmount(inp.value); if(v==null){inp.classList.add('bad');return;} t.amount=v; t.check=false; render();};
+    ok.onclick=save; no.onclick=()=>renderTx(); inp.onkeydown=e=>{if(e.key==='Enter')save();};
   });
+}
+// Elle yazılan tutar: "120", "120,50", "1.234,56", "1234.56", "250 TL", "₺300".
+function parseUserAmount(v){
+  let s=String(v).replace(/\s|TL|₺/gi,'').replace(/^[-−+]/,''); if(!/^[\d.,]+$/.test(s)) return null;
+  if((s.match(/,/g)||[]).length>1) return null;
+  if(s.includes(',')) s=s.replace(/\./g,'').replace(',','.');
+  else if(/^\d{1,3}(\.\d{3})+$/.test(s)) s=s.replace(/\./g,'');
+  const n=parseFloat(s); return isFinite(n)&&n>0&&(s.match(/\./g)||[]).length<=1?Math.round(n*100)/100:null;
 }
 renderLearn();
 if('serviceWorker' in navigator){
