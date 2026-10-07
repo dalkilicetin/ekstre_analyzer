@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="connect-src 'none'; form-action 'none'">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ekstre">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#EEF1EE" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F1719" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>Ekstre Analiz</title>
+<script src="pdf.min.js"></script>
+<script src="pdf.worker.min.js"></script>
+<script src="xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#EEF1EE; --paper:#FBFCFA; --ink:#17232B; --muted:#5E6B72; --line:#D5DBD6;
+  --accent:#1F5C55; --accent-ink:#FFFFFF; --in:#2D7A3E; --warn:#A33B2B; --guess:#8A6A12;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F1719; --paper:#172124; --ink:#E7ECEA; --muted:#93A19E; --line:#2A3639;
+    --accent:#6FC3B5; --accent-ink:#0F1719; --in:#7FD08E; --warn:#F08B78; --guess:#E4C068;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F1719; --paper:#172124; --ink:#E7ECEA; --muted:#93A19E; --line:#2A3639;
+  --accent:#6FC3B5; --accent-ink:#0F1719; --in:#7FD08E; --warn:#F08B78; --guess:#E4C068;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+.num,h1,h2,.big{font-family:ui-rounded,"SF Pro Rounded",system-ui,sans-serif;font-variant-numeric:tabular-nums}
+main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:1.9rem;line-height:1.1;margin:8px 0 6px;font-weight:800;letter-spacing:-.02em}
+h2{font-size:1.15rem;margin:0 0 8px;font-weight:700}
+p{margin:0 0 10px}
+.lock{font-size:.85rem;color:var(--muted)}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:18px;margin-top:16px}
+.panel.todo{border:2px solid var(--accent)}
+.drop{border:2px dashed var(--line);border-radius:14px;padding:22px 16px;text-align:center}
+.drop.over{border-color:var(--accent)}
+button,.btn{appearance:none;border:1px solid var(--line);background:var(--paper);color:var(--ink);
+  font:inherit;font-weight:600;border-radius:999px;padding:10px 16px;cursor:pointer}
+.small{padding:5px 12px;font-size:.85rem}
+.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible,.legend li:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+.row.left{justify-content:flex-start}
+textarea{width:100%;min-height:120px;border:1px solid var(--line);border-radius:12px;padding:10px;
+  background:var(--bg);color:var(--ink);font:13px/1.4 ui-monospace,Menlo,monospace}
+#status{min-height:1.5em;margin-top:10px;font-size:.92rem;color:var(--muted)}
+#status.err{color:var(--warn)}
+.hidden{display:none!important}
+.headline{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
+.big{font-size:2.6rem;font-weight:800;line-height:1;letter-spacing:-.03em}
+.sub{color:var(--muted);font-size:.92rem}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+.stat b{display:block;font-size:1.05rem}
+.stat span{font-size:.8rem;color:var(--muted)}
+.ribbon{display:flex;height:28px;border-radius:8px;overflow:hidden;margin:16px 0 14px}
+.ribbon div{height:100%;min-width:3px}
+.legend{list-style:none;margin:0;padding:0}
+.legend li{display:grid;grid-template-columns:14px 1fr auto auto;gap:10px;align-items:center;
+  padding:9px 4px;border-top:1px solid var(--line);cursor:pointer}
+.legend li.on{background:color-mix(in srgb,var(--accent) 12%,transparent);border-radius:8px}
+.dot{width:12px;height:12px;border-radius:4px}
+.pct{color:var(--muted);font-size:.85rem;min-width:3.2em;text-align:right}
+.bars{display:flex;align-items:flex-end;gap:2px;height:120px;overflow-x:auto;padding-bottom:2px}
+.bars div{flex:1 0 6px;background:var(--accent);border-radius:3px 3px 0 0;min-height:1px}
+.axis{display:flex;justify-content:space-between;font-size:.75rem;color:var(--muted);margin-top:4px}
+.merch{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:11px 0;border-top:1px solid var(--line);align-items:center}
+.merch .name{font-weight:600;overflow-wrap:anywhere}
+.merch .ctl{grid-column:1/-1;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+select{font:inherit;font-size:.88rem;border:1px solid var(--line);border-radius:8px;padding:5px 8px;background:var(--bg);color:var(--ink);max-width:100%}
+.badge{font-size:.75rem;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.badge.user{color:var(--accent);border-color:var(--accent)}
+.badge.model{color:var(--guess);border-color:var(--guess)}
+.badge.none{color:var(--warn);border-color:var(--warn)}
+.tx{display:grid;grid-template-columns:auto 1fr auto;gap:10px;padding:10px 0;border-top:1px solid var(--line);align-items:center}
+.tx .d{font-size:.8rem;color:var(--muted);width:3.6em}
+.tx .desc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx .c{display:block;font-size:.78rem;color:var(--muted)}
+.tx .in{color:var(--in)}
+.search{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg);color:var(--ink);font:inherit;margin-bottom:6px}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.filter-tag{font-size:.85rem;color:var(--accent);background:none;border:none;padding:4px 0}
+.note{font-size:.85rem;color:var(--muted)}
+.progress{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:8px 0 4px}
+.progress div{height:100%;background:var(--accent)}
+@media (max-width:420px){.big{font-size:2.1rem}.stats{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Ekstre analizi</h1>
+  <div class="lock">🔒 Dosyaların bu cihazda işlenir, sayfanın ağ bağlantısı kapalı. Yalnızca öğrettiğin kategori seçimleri bu cihazda saklanır.<span id="offlineNote"></span></div>
+
+  <section class="panel" id="inputPanel">
+    <div class="drop" id="drop">
+      <p><strong>Akbank ekstreni seç</strong></p>
+      <p class="note">PDF, Excel veya CSV. Birden fazla ay seçebilirsin; tekrar eden işlemler bir kez sayılır.</p>
+      <div class="row">
+        <label class="btn primary" for="file">Dosya seç</label>
+        <input id="file" type="file" accept=".pdf,.xls,.xlsx,.csv,.txt,application/pdf" multiple hidden>
+        <button id="pasteToggle">Metin yapıştır</button>
+        <button id="demo">Örnekle dene</button>
+      </div>
+    </div>
+    <div id="pasteBox" class="hidden" style="margin-top:12px">
+      <textarea id="pasteText" placeholder="Ekstredeki işlem satırlarını buraya yapıştır&#10;Örn: 29/08/2026 BREKKIE ISTANBUL TR 1,730.00"></textarea>
+      <div class="row"><button class="primary" id="pasteGo">Analiz et</button></div>
+    </div>
+    <div id="status" role="status"></div>
+  </section>
+
+  <div id="results" class="hidden">
+    <section class="panel todo hidden" id="todoPanel">
+      <h2 id="todoTitle"></h2>
+      <p class="note">Bir kez seçmen yeter. Aynı yer tekrar gelince otomatik tanınır, benzer isimleri de tahmin etmeye başlarım.</p>
+      <div class="progress"><div id="prog"></div></div>
+      <p class="note" id="progText"></p>
+      <div id="todoList"></div>
+    </section>
+
+    <section class="panel">
+      <div class="headline">
+        <span class="big num" id="total"></span>
+        <span class="sub" id="range"></span>
+      </div>
+      <div class="stats">
+        <div class="stat"><b class="num" id="sCount"></b><span>harcama işlemi</span></div>
+        <div class="stat"><b class="num" id="sRef"></b><span>iade (düşüldü)</span></div>
+        <div class="stat"><b class="num" id="sIn"></b><span>kart ödemesi</span></div>
+      </div>
+      <div class="ribbon" id="ribbon" aria-hidden="true"></div>
+      <ul class="legend" id="legend"></ul>
+      <p class="note" style="margin-top:10px">Bir kategoriye dokununca işlemler ona göre süzülür.</p>
+    </section>
+
+    <section class="panel">
+      <h2 id="barsTitle">Günlük harcama</h2>
+      <div class="bars" id="bars"></div>
+      <div class="axis"><span id="axL"></span><span id="axR"></span></div>
+      <p class="note" style="margin-top:8px">Önceki aylardan gelen taksitler ekstre döneminin ilk gününe yazılır.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Harcadığın yerler</h2>
+      <p class="note">Yanlış bulduğun kategoriyi değiştir; seçimin kaydedilir ve sonraki ekstrelerde de geçerli olur.</p>
+      <div id="merchants"></div>
+      <div class="row"><button class="small hidden" id="moreMerch">Tümünü göster</button></div>
+    </section>
+
+    <section class="panel">
+      <div class="toolbar">
+        <h2 style="margin:0">İşlemler</h2>
+        <button class="filter-tag hidden" id="clearFilter"></button>
+      </div>
+      <input class="search" id="search" type="search" placeholder="İşlem ara" style="margin-top:10px">
+      <div id="txList"></div>
+    </section>
+
+    <div class="row" style="margin-top:20px">
+      <button id="addMore">Başka ekstre ekle</button>
+      <button id="reset">Ekstre verilerini temizle</button>
+    </div>
+  </div>
+
+  <section class="panel">
+    <h2>Öğrendiklerim</h2>
+    <p class="note" id="learnStats"></p>
+    <div class="row left">
+      <button class="small" id="addCat">Yeni kategori ekle</button>
+      <button class="small" id="backup">Yedekle</button>
+      <button class="small" id="restoreToggle">Yedekten yükle</button>
+      <button class="small" id="forget">Öğrenilenleri sil</button>
+    </div>
+    <div id="backupBox" class="hidden" style="margin-top:12px">
+      <p class="note" id="backupNote"></p>
+      <textarea id="backupText"></textarea>
+      <div class="row left"><button class="small primary hidden" id="restoreGo">Yükle</button></div>
+    </div>
+  </section>
+</main>
+
+<script>
+(function(){
+const $=s=>document.querySelector(s);
+const fmt=new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY',maximumFractionDigits:2});
+const fmt0=new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY',maximumFractionDigits:0});
+const dShort=new Intl.DateTimeFormat('tr-TR',{day:'2-digit',month:'short'});
+const dLong=new Intl.DateTimeFormat('tr-TR',{day:'numeric',month:'long',year:'numeric'});
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fold=s=>String(s).toLocaleUpperCase('tr-TR').replace(/Ç/g,'C').replace(/Ğ/g,'G').replace(/İ/g,'I').replace(/Ö/g,'O').replace(/Ş/g,'S').replace(/Ü/g,'U');
+
+if(window.pdfjsLib){pdfjsLib.GlobalWorkerOptions.workerSrc='pdf.worker.min.js';}
+
+/* =========================================================
+   Hazır sözlük. Sıra önemli: özel olan genelden önce gelir.
+   Kural: 6+ harf → metnin içinde herhangi yerde aranır.
+          5 ve altı → tam kelime olarak aranır.
+          Sonu * → kelime başı olarak aranır (BOREK* → BOREKCISI).
+   ========================================================= */
+const BASE=[
+ {n:'Abonelik',c:'#7A4FA3',k:['NETFLIX','SPOTIFY','YOUTUBE','APPLE.COM','ITUNES','ICLOUD','GOOGLE','GOOGLE PLAY','DISNEY','AMAZONPRIME','AMAZON PRIME','PRIMEVIDEO','PRIME VIDEO','EXXEN','BLUTV','BLU TV','HBOMAX','HBO','TOD','GAIN','CHATGPT','OPENAI','ANTHROPIC','CLAUDE.AI','MICROSOFT','XBOX','ADOBE','PLAYSTATION','STEAM','STEAMGAMES','DIGITURK','DSMART','D-SMART','TIVIBU','MUBI','DEEZER','FIZY','AUDIBLE','STORYTEL','DUOLINGO','CANVA','NOTION','DROPBOX','LINKEDIN','MEDIUM','PATREON','TWITCH','TWITTER','GITHUB','JETBRAINS','CURSOR','NORDVPN','SURFSHARK','EXPRESSVPN','LASTPASS','1PASSWORD','MIDJOURNEY','ELEVENLABS','PERPLEXITY','GEMINI','SUBSCRIPTION','ABONELIK']},
+ {n:'Yeme içme',c:'#D9822B',k:['YEMEKSEPETI','GETIRYEMEK','GETIR YEMEK','TRENDYOLYEMEK','TRENDYOL YEMEK','TRENDYOLGO','TRENDYOL GO','UBERTRENDYOL','UBER EATS','UBEREATS','MIGROSYEMEK','MIGROS YEMEK','STARBUCKS','KAHVE DUNYASI','KAHVEDUNYASI','TCHIBO','CAFFE NERO','CAFFENERO','GLORIA JEAN','ESPRESSOLAB','ESPRESSO','COFFEE','KAHVE*','CAFE*','KAFE*','CAFFE*','RESTAURANT','RESTORAN','RESTAURAN','RISTORANTE','TRATTORIA','LOKANTA','BURGER','PIZZA','PIZZERIA','DOMINO','LITTLE CAESAR','PAPA JOHN','KFC','MCDONALD','POPEYES','ARBY','SBARRO','DONER*','KEBAP*','KEBAB*','KOFTE*','SIMIT*','BAKLAVA','PASTANE','PATISSERIE','PASTRY','FIRIN*','FIRINI','BOREK*','MEYHANE','BISTRO','BRASSERIE','TATLI*','DONDURMA','MADO','GULLUOGLU','HAFIZ MUSTAFA','BRUNCH','KAHVALTI','BREKKIE','NUSR','SUSHI','RAMEN','CIGKOFTE','CIG KOFTE','KOMAGENE','TAVUK*','PIDE*','LAHMACUN','OCAKBASI','BALIK*','BAR','PUB','BIRA*','BIRAHANE','WINE','SARAP*','GASTRO','DINER','STEAKHOUSE','STEAK','MANTI*','KOKOREC','MIDYE','TANTUNI','DURUM*','WAFFLE','KUMPIR','CHOCOLATE','CIKOLATA','BAKERY','FOOD','YEMEK*','MUTFAK*','EV YEMEK','SOFRA*','DOYUM','KOSKERI','KOSKA','DOMINOS','DUNKIN','STARBUCK','PROPAGANDA','PETRA ROASTING','MANDABATMAZ','FAKO','BEBEK KAHVE']},
+ {n:'Seyahat & konaklama',c:'#3A7CA5',k:['THY','TURK HAVA','TURKHAVA','TURKISH AIR','PEGASUS','FLYPGS','AJET','SUNEXPRESS','ANADOLUJET','LUFTHANSA','KLM','AIRFRANCE','AIR FRANCE','RYANAIR','EASYJET','WIZZ','TRANSAVIA','AIRBNB','BOOKING','HOTEL*','HOTELS','OTEL*','OTELI','RESORT','HOSTEL','PANSIYON','SUITES','ETSTUR','TATILSEPETI','JOLLY','SETUR','TATILBUDUR','ENUYGUN','SKYSCANNER','EXPEDIA','AGODA','TRIVAGO','HAVALIMANI','AIRPORT','DUTY FREE','DUTYFREE','TAV','HAVAS','EUROSTAR','VISA FEE','VIZE']},
+ {n:'Ulaşım',c:'#2F7DB5',k:['UBER','BITAKSI','ISTANBULKART','ISTANBUL KART','BELBIM','METRO ISTANBUL','METROISTANBUL','IETT','MARMARAY','IZBAN','ESHOT','EGO','TCDD','YHT','HGS','OGS','OTOPARK','ISPARK','MARTI','BINBIN','HOP','TIKTAK','YOYO','GETIRDRIVE','GETIR DRIVE','ZIPCAR','TAKSI','TAKSICI*','TAKSI DURAG','TAXI','BOLT','FREENOW','FREE NOW','VAPUR*','SEHIR HATLARI','SEHIRHATLARI','IDO','TURYOL','DENTUR','BUDO','OBILET','KAMIL KOC','KAMILKOC','METRO TURIZM','PAMUKKALE TURIZM','NILUFER TURIZM','OTOYOL','AVRASYA TUNEL','OSMANGAZI','YAVUZ SULTAN','KGM','RENT A CAR','RENTACAR','OTO KIRALAMA','AVIS','BUDGET','SIXT','ENTERPRISE','EUROPCAR','GARENTA','VALE','OTOPARKI','ARAC MUAYENE','TUVTURK','OTO YIKAMA','OTOYIKAMA','LASTIK*','OTO SERVIS','YEDEK PARCA']},
+ {n:'Market',c:'#3E8E5A',k:['MIGROS','CARREFOUR','CARREFOURSA','A101','BIM','BIM BIRLESIK','SOK','SOK MARKET','SOKMARKET','FILE','MACROCENTER','MACRO CENTER','METRO','ONUR MARKET','HAKMAR','GETIR','GETIRBUYUK','ISTEGELSIN','KIM MARKET','MARKET','SUPERMARKET','BAKKAL','MANAV','KASAP*','SARKUTERI','TARIM KREDI','TARIMKREDI','BIZIM TOPTAN','HAPPY CENTER','ALTUNBILEKLER','KILER','YUNUS MARKET','GURMAR','ESENLIK','UCUZLUK','SEYHANLAR','BEYPAZARI','SUTCU','KURUYEMIS','KURU YEMIS','TOPTAN','GROSS','BILLA','LIDL','ALDI','REWE','EDEKA','ALBERT HEIJN','JUMBO','TESCO','SAINSBURY']},
+ {n:'Akaryakıt',c:'#8C5A2B',k:['SHELL','OPET','BP','PETROL OFISI','PETROLOFISI','TOTAL','TOTALENERGIES','AYTEMIZ','AKARYAKIT','LUKOIL','TP PETROL','ALPET','KADOIL','PETROL','SUNPET','MOIL','AKPET','AYGAZ','IPRAGAZ','ISTASYON*','GO PETROL','TPPD','ESSO']},
+ {n:'Kıyafet & aksesuar',c:'#C24E6E',k:['ZARA','H&M','LCW','LC WAIKIKI','LCWAIKIKI','KOTON','MAVI','DEFACTO','BOYNER','NIKE','ADIDAS','PUMA','NEW BALANCE','NEWBALANCE','SKECHERS','BERSHKA','PULL&BEAR','PULL AND BEAR','PULLANDBEAR','STRADIVARIUS','MANGO','MASSIMO DUTTI','MASSIMODUTTI','OYSHO','COLINS','COLIN S','LTB','NETWORK','VAKKO','BEYMEN','IPEKYOL','MACHKA','DERIMOD','DESA','FLO','INSTREET','AYAKKABI','SAAT*','SAATCI','SWATCH','TIME PROFESSOR','ATASAY','PANDORA','TAKI*','KUYUMCU','GIYIM*','TEKSTIL','TRENDYOLMILLA','JACK&JONES','JACK JONES','TOMMY','LACOSTE','LEVI','GAP','US POLO','USPOLO','HUGO','BOSS','MARKS&SPENCER','MARKS SPENCER','DIESEL','UNIQLO','PENTI','SUWEN','MADAME','ALTINYILDIZ','KIGILI','DAMAT','TWEEN','SARAR','BEYMEN CLUB','RAMSEY','CAMPER','CROCS','CONVERSE','VANS','TIMBERLAND','NORTHFACE','NORTH FACE','COLUMBIA','JACK WOLFSKIN','MUDO CONCEPT','LOVE MY BODY','ELLE','GOZLUK','SUNGLASS','RAY-BAN','RAYBAN','SPORTIVE','SUPERSTEP','KINETIX','KEMAL TANCA','HOTIC','CHARLES&KEITH','ACCESSORIZE','CLAIRE']},
+ {n:'Kişisel bakım',c:'#B5612F',k:['WATSONS','GRATIS','ROSSMANN','SEPHORA','MAC COSMETICS','KIKO','FLORMAR','GOLDEN ROSE','YVES ROCHER','KUAFOR*','BERBER*','GUZELLIK','SPA','MASAJ','NAIL','TIRNAK','KOZMETIK','PARFUM*','EVEON','MARIONNAUD','THE BODY SHOP','BODYSHOP','L OCCITANE','LOCCITANE','KIEHL','ESTEE LAUDER','BARBER','HAIR','SALON*','EPILASYON','LAZER']},
+ {n:'Spor',c:'#4D8F2A',k:['DECATHLON','MACFIT','MAC FIT','SPORTS INTERNATIONAL','GYM','FITNESS','SPOR SALONU','SPOR*','PILATES','YOGA','CROSSFIT','TENIS','HALI SAHA','HALISAHA','YUZME','GOLF','KAYAK*','DALIS','CLIMB','TIRMANIS']},
+ {n:'Sağlık',c:'#2A9D8F',k:['ECZANE*','ECZANESI','PHARMACY','HASTANE*','HASTANESI','KLINIK*','POLIKLINIK','MEDICAL','MEDIKAL','SAGLIK','DIS HEKIM','AGIZ VE DIS','DENTAL','DENTIST','ACIBADEM','MEDICANA','MEMORIAL','LIV','FLORENCE NIGHTINGALE','AMERIKAN HASTANE','MEDIPOL','DUNYAGOZ','LABORATUVAR','TAHLIL','FIZYOTERAPI','PSIKOLOG','DIYETISYEN','DOKTOR','DR.','OPTIK','VETERINER','VET','PETSHOP','PET SHOP','PETLEBI']},
+ {n:'Online alışveriş',c:'#D45A8A',k:['TRENDYOL','HEPSIBURADA','AMAZON','N11','CICEKSEPETI','ALIEXPRESS','TEMU','SHEIN','MORHIPO','GITTIGIDIYOR','PTTAVM','ETSY','EBAY','MODANISA','DOLAP','SAHIBINDEN','LETGO','ALIBABA','WISH','FARFETCH','ZALANDO','ASOS']},
+ {n:'Ev & teknoloji',c:'#4A5BA8',k:['IKEA','KOCTAS','BAUHAUS','TEKZEN','TEKNOSA','MEDIAMARKT','MEDIA MARKT','VATAN','APPLE STORE','APPLESTORE','APPLE.COM/TR','ENGLISH HOME','ENGLISHHOME','MADAME COCO','KARACA','PASABAHCE','ARCELIK','VESTEL','BEKO','SAMSUNG','XIAOMI','HUAWEI','ITOPYA','INCEHESAP','MONSTER','CASPER','BOSCH','DYSON','PHILIPS','MUDO','HOME','CHAKRA','YATAS','ISTIKBAL','BELLONA','DOGTAS','EVIDEA','JUMBO','SCHAFER','EMSAN','KORKMAZ','TEFAL','HIRDAVAT','NALBUR*','ELEKTRONIK','BILGISAYAR','TELEFON','GSM','CEP DUNYASI','TURKCELL MAGAZA','DIJITAL','MOBILYA','PERDE','HALI','ZUCCACIYE','MOBILE']},
+ {n:'Eğlence & kültür',c:'#9C3D8A',k:['BILET*','PASSO','BILETIX','BILETINIAL','MOBILET','SINEMA*','CINEMAXIMUM','CINEMA','CINEVERSE','KONSER','MUZE*','MUZEKART','D&R','KITAP*','KITABEVI','TIYATRO','BOWLING','KARAOKE','OYUN*','ESCAPE','LUNAPARK','AKVARYUM','AQUARIUM','ZOO','IDEFIX','REMZI','NEZIH','PANDORA KITAP','KABARE','GALERI','SERGI','FESTIVAL','EVENT','TICKET','GAMES','TOYZZ','OYUNCAK*','HOBI*']},
+ {n:'Eğitim',c:'#6E7F2E',k:['UNIVERSITE','UNIVERSITY','OKUL*','KOLEJ*','KURS*','UDEMY','COURSERA','DERSHANE','AKADEMI','ACADEMY','EGITIM','ETUT','KIRTASIYE','OSYM','YDS','IELTS','TOEFL']},
+ {n:'Finans & banka',c:'#5B6B5E',k:['FINDEKS','KART AIDAT','KART UCRET','YILLIK UCRET','FAIZ','KKDF','BSMV','GECIKME','SIGORTA','ALLIANZ','AXA','ANADOLU SIGORTA','MAPFRE','SOMPO','NEOVA','HDI','AKSIGORTA','AK SIGORTA','KASKO','MIDAS','BINANCE','BTCTURK','PARIBU','ICRYPEX','OKX','BYBIT','VERGI','GIB','MTV','HARC*','NOTER*','EDEVLET','E-DEVLET','BELEDIYE','EMLAK','TRAFIK CEZA','CEZA*','BAGIS','BAGIS*','DERNEK','VAKFI','VAKIF']},
+ {n:'Fatura & iletişim',c:'#5A6C7A',k:['TURKCELL','VODAFONE','TURK TELEKOM','TURKTELEKOM','SUPERONLINE','TTNET','TURKNET','MILLENICOM','ENERJISA','CK ENERJI','CKBOGAZICI','AYEDAS','BEDAS','IGDAS','ISKI','ASKI','IZSU','BASKENTGAZ','IZMIRGAZ','AKSAGAZ','ELEKTRIK','DOGALGAZ','DOGAL GAZ','FATURA*','SU IDARESI','AIDAT*','SITE YONETIM','APT YONETIM','KARGO','YURTICI','ARAS KARGO','MNG KARGO','PTT']},
+ {n:'Nakit & transfer',c:'#7D7D7D',k:['ATM','NAKIT AVANS','NAKIT','EFT','HAVALE','FAST','VIRMAN','PARA TRANSFER','PAPARA','ININAL','ENPARA','WISE','REVOLUT','PAYPAL']}
+];
+const PAL=['#B8860B','#0F7C8C','#8E44AD','#C0392B','#2E86C1','#7F8C3A','#D35400','#16A085'];
+const DIGER={n:'Diğer',c:'#A7A9A0'}, NONE={n:'Kategorisiz',c:'#D3C7B8'};
+function kwRe(k){
+  const pre=k.endsWith('*'); k=k.replace(/\*$/,'').trim();
+  const e=k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  if(pre) return new RegExp('(^|[^A-Z0-9])'+e);
+  if(k.length>=6) return new RegExp(e);
+  return new RegExp('(^|[^A-Z0-9])'+e+'([^A-Z0-9]|$)');
+}
+BASE.forEach(c=>c.re=c.k.map(kwRe));
+function dictCat(desc){const f=' '+fold(desc).replace(/\(\s*[\d.,]+\s*(TL|TRY|USD|EUR|GBP)?\s*\)/g,' ').replace(/\d+\s*\/\s*\d+\s*\.?\s*TAKSIT(-?IADE)?/g,' ')+' ';for(const c of BASE){if(c.re.some(r=>r.test(f)))return c.n;}return null;}
+
+/* ---------- Öğrenme hafızası (yalnızca bu cihazda, localStorage) ---------- */
+const LS='ekstre-ogrenme-v1';
+let learn={m:{},t:{},cats:[]};
+function loadLearn(){try{const s=localStorage.getItem(LS);if(s){const o=JSON.parse(s);learn={m:o.m||{},t:o.t||{},cats:o.cats||[]};}}catch(e){}}
+function saveLearn(){try{localStorage.setItem(LS,JSON.stringify(learn));}catch(e){}}
+loadLearn();
+const catList=()=>[...BASE.map(c=>c.n),...learn.cats.map(c=>c.n),DIGER.n];
+function catColor(n){const b=BASE.find(c=>c.n===n)||learn.cats.find(c=>c.n===n);return b?b.c:(n===NONE.n?NONE.c:DIGER.c);}
+
+const STOP=new Set(['ISTANBUL','ANKARA','IZMIR','ANTALYA','BURSA','KOCAELI','MUGLA','BODRUM','TR','TUR','TURKEY','TURKIYE','GBR','USA','US','IRL','NLD','DEU','LUX','FRA','LONDON','DUBLIN','AMSTERDAM','LUXEMBOURG','COM','WWW','CO','NET','ORG','LTD','STI','AS','SAN','TIC','VE','INC','LLC','GMBH','BV','THE','OF','AND','MAGAZA','MAGAZASI','MAGAZACILIK','SUBE','SUBESI','AVM','TEKS','SA','HTTPS','HTTP','ONLINE','TAKSIT','IADE','TL','TRY','PAZ','GIDA','HIZ','HIZMETLERI','URUNLERI','LIMITED','SIRKETI','ANONIM','KADIKOY','BESIKTAS','SISLI','USKUDAR','BEYOGLU','SARIYER','ATASEHIR','MALTEPE','KARTAL','PENDIK','BAKIRKOY','FATIH','EMINONU','SULTANBEYLI','UMRANIYE','BEYKOZ','CANKAYA','KONAK','BORNOVA','KARSIYAKA']);
+const PROC=/^(IYZICO|IYZ|PARATI|PARAM|PAYTR|SIPAY|PAYU|PAYPAL|GOOGLE|SQ|SP|SUMUP|ZTL|PAPARA|MOKA|CRAFTGATE|LIDIO|ESNEKPOS|TOSLA)\s*[\/*]\s*/;
+function cleanDesc(d){
+  let s=fold(d).replace(/\(\s*[\d.,]+\s*(TL|TRY|USD|EUR|GBP)?\s*\)/g,' ').replace(/\d+\s*\/\s*\d+\s*\.?\s*TAKSIT(-?IADE)?/g,' ');
+  s=s.replace(PROC,'');
+  return s.replace(/\s+/g,' ').trim();
+}
+function tokens(d){
+  return cleanDesc(d).split(/[^A-Z0-9&]+/).map(t=>t.replace(/(ISTANBUL|ANKARA|IZMIR)$/,'')).filter(t=>t.length>1&&!/^\d+$/.test(t)&&!STOP.has(t));
+}
+function merchantKey(d){const t=tokens(d);return t.slice(0,2).join(' ')||cleanDesc(d)||fold(d);}
+function feats(d){const t=tokens(d);const f=new Set(t);t.forEach(x=>{if(x.length>=7)f.add('P:'+x.slice(0,5));});return [...f];}
+function adjust(d,cat,delta){
+  for(const f of feats(d)){const r=learn.t[f]=learn.t[f]||{};r[cat]=(r[cat]||0)+delta;if(r[cat]<=0)delete r[cat];if(!Object.keys(r).length)delete learn.t[f];}
+}
+function predict(d){
+  const sc={};let ev=0;
+  for(const f of feats(d)){const r=learn.t[f];if(!r)continue;const tot=Object.values(r).reduce((a,b)=>a+b,0);if(!tot)continue;ev++;for(const c in r)sc[c]=(sc[c]||0)+r[c]/tot;}
+  if(!ev)return null;
+  const e=Object.entries(sc).sort((a,b)=>b[1]-a[1]);const sum=e.reduce((a,b)=>a+b[1],0);
+  return e[0][1]/sum>=0.6?e[0][0]:null;
+}
+function classify(t){
+  const u=learn.m[t.key]; if(u) return {c:u,src:'user'};
+  const d=dictCat(t.desc); if(d) return {c:d,src:'dict'};
+  const p=predict(t.desc); if(p) return {c:p,src:'model'};
+  return {c:NONE.n,src:'none'};
+}
+function setRule(key,desc,cat){
+  const old=learn.m[key];
+  if(old) adjust(desc,old,-1);
+  if(cat){learn.m[key]=cat;adjust(desc,cat,+1);} else delete learn.m[key];
+  saveLearn(); render();
+}
+
+/* ---------- Ekstre verisi (yalnızca bellekte) ---------- */
+let txs=[];let filterCat=null;let showAllMerch=false;
+
+/* ---------- Ayrıştırma ---------- */
+const DATE_RE=/^(\d{2})[./-](\d{2})[./-](\d{4}|\d{2})(?!\d)\s*(.*)$/;
+const AMT_RE=/([+-])?\s?(\d{1,3}(?:[.,]\d{3})+|\d+)[.,](\d{2})(?!\d)(\s?\(\s?-\s?\)|\s?[+-](?![\d]))?/g;
+const PAY_RE=/ODEMENIZ|ODEME|TESEKKUR/;
+const REFUND_RE=/IADE|IPTAL/;
+const PERIOD_RE=/(\d{2})[./](\d{2})[./](\d{4})\s*-\s*(\d{2})[./](\d{2})[./](\d{4})/;
+
+function parseLines(lines){
+  const out=[];out.period=null;
+  for(let line of lines){
+    line=String(line).replace(/\s+/g,' ').trim();
+    const fl=fold(line);
+    if(!out.period&&/EKSTRE DONEM|HESAP DONEM/.test(fl)){const p=fl.match(PERIOD_RE);if(p)out.period=new Date(+p[3],+p[2]-1,+p[1]);}
+    const m=line.match(DATE_RE); if(!m) continue;
+    let y=+m[3]; if(y<100) y+=2000;
+    const mo=+m[2], da=+m[1]; if(mo<1||mo>12||da<1||da>31) continue;
+    const date=new Date(y,mo-1,da);
+    let rest=m[4].replace(/^\d{2}:\d{2}(:\d{2})?\s*/,'').replace(/^\d{2}[./]\d{2}[./]\d{2,4}\s*/,'');
+    const descSrc=rest;
+    rest=rest.replace(/\(\s*[\d.,]+\s*(TL|TRY|USD|EUR|GBP)?\s*\)/gi,m=>' '.repeat(m.length));
+    AMT_RE.lastIndex=0;
+    let a=AMT_RE.exec(rest); if(!a) continue;
+    const after=rest.slice(a.index+a[0].length).trimStart();
+    if(/^(USD|EUR|GBP|\$|€|£)/i.test(after)){const b=AMT_RE.exec(rest); if(b) a=b;}
+    const desc=descSrc.slice(0,a.index).replace(/\b(TL|TRY)\s*$/,'').replace(/\s+/g,' ').trim();
+    if(!desc||!/[A-Za-zÇĞİÖŞÜçğıöşü]/.test(desc)) continue;
+    let amt=parseFloat(a[2].replace(/[.,]/g,'')+'.'+a[3]);
+    const trail=(a[4]||'').replace(/\s/g,'');
+    if(a[1]==='-'||trail==='-') amt=-amt;
+    out.push({date,desc,amt,credit:trail==='(-)'||trail==='+'||a[1]==='+'});
+  }
+  return out;
+}
+
+async function pdfLines(file){
+  const task=pdfjsLib.getDocument({data:await file.arrayBuffer(),isEvalSupported:false,disableFontFace:true});
+  task.onPassword=(update,reason)=>{
+    const pw=prompt(reason===2?'Şifre yanlış. Tekrar gir:':file.name+' şifreli. PDF şifresini gir:');
+    if(pw===null) task.destroy(); else update(pw);
+  };
+  const pdf=await task.promise; const lines=[];
+  for(let p=1;p<=pdf.numPages;p++){
+    const tc=await (await pdf.getPage(p)).getTextContent();
+    const items=tc.items.filter(i=>i.str&&i.str.trim()).map(i=>({x:i.transform[4],y:i.transform[5],s:i.str}))
+      .sort((a,b)=>b.y-a.y||a.x-b.x);
+    let row=[],ry=null;
+    const flush=()=>{if(row.length)lines.push(row.sort((a,b)=>a.x-b.x).map(o=>o.s).join(' '));row=[];};
+    for(const it of items){ if(ry===null||Math.abs(it.y-ry)>3){flush();ry=it.y;} row.push(it); }
+    flush();
+  }
+  return lines;
+}
+
+function toDate(v){
+  if(v instanceof Date&&!isNaN(v)) return new Date(v.getFullYear(),v.getMonth(),v.getDate());
+  if(typeof v==='number'&&v>20000&&v<80000){const d=new Date(Math.round((v-25569)*864e5));return new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());}
+  const m=String(v).trim().match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+  if(!m) return null; let y=+m[3]; if(y<100)y+=2000; return new Date(y,+m[2]-1,+m[1]);
+}
+function toNum(v){
+  if(typeof v==='number') return v;
+  let s=String(v).replace(/\s|TL|TRY/gi,''); if(!s) return null;
+  const neg=/\(-\)$/.test(s); s=s.replace(/\(-\)$/,'');
+  const m=s.match(/^(.*)[.,](\d{1,2})$/);
+  s=m?m[1].replace(/[.,]/g,'')+'.'+m[2]:s.replace(/[.,]/g,'');
+  const n=parseFloat(s); return isNaN(n)?null:(neg?-n:n);
+}
+async function parseExcel(file){
+  const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true}); const out=[];out.period=null;
+  for(const sn of wb.SheetNames){
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''});
+    let h=-1,dc=-1,tc=-1,ac=-1;
+    for(let i=0;i<Math.min(rows.length,50);i++){
+      const r=rows[i].map(c=>fold(c));
+      const d=r.findIndex(c=>c.includes('TARIH')), t=r.findIndex(c=>(c.includes('TUTAR')||c.includes('BORC'))&&!c.includes('BAKIYE')&&!c.includes('KALAN'));
+      if(d>=0&&t>=0){h=i;dc=d;tc=t;ac=r.findIndex((c,j)=>j!==d&&(c.includes('ACIKLAMA')||c.includes('ISYERI')||c.includes('ISLEM')));break;}
+    }
+    if(h<0){const p=parseLines(rows.map(r=>r.map(c=>c instanceof Date?c.toLocaleDateString('tr-TR'):c).join(' ')));out.push(...p);out.period=out.period||p.period;continue;}
+    for(const r of rows.slice(h+1)){
+      const date=toDate(r[dc]); const amt=toNum(r[tc]);
+      if(!date||amt==null||amt===0) continue;
+      const desc=String(ac>=0?r[ac]:r.filter((c,j)=>j!==dc&&j!==tc&&typeof c==='string').join(' ')).replace(/\s+/g,' ').trim();
+      if(desc) out.push({date,desc,amt,credit:false});
+    }
+  }
+  return out;
+}
+
+function addRaw(raw){
+  if(!raw.length){setStatus('İşlem satırı bulunamadı. Dosya taranmış görüntü olabilir; işlem satırlarını kopyalayıp "Metin yapıştır" ile dene.',true);return 0;}
+  const account=raw.filter(r=>r.amt<0).length>raw.length*0.5;
+  const existing={}; txs.forEach(t=>existing[t.id]=(existing[t.id]||0)+1);
+  const batch={}; let added=0;
+  for(const r of raw){
+    const f=fold(r.desc);
+    let date=r.date, inst=/TAKSIT/.test(f);
+    if(raw.period&&inst&&date<raw.period) date=raw.period;
+    const id=date.getTime()+'|'+r.desc+'|'+r.amt;
+    batch[id]=(batch[id]||0)+1; if(batch[id]<=(existing[id]||0)) continue;
+    let type;
+    if(account) type=r.amt<0?'out':'in';
+    else if(r.credit||r.amt<0||PAY_RE.test(f)) type=(PAY_RE.test(f)&&!REFUND_RE.test(f))?'in':'refund';
+    else type='out';
+    txs.push({id,date,desc:r.desc,amount:Math.abs(r.amt),type,inst,key:merchantKey(r.desc)});
+    added++;
+  }
+  txs.sort((a,b)=>b.date-a.date);
+  return added;
+}
+
+/* ---------- Giriş ---------- */
+function setStatus(msg,err){const s=$('#status');s.textContent=msg;s.className=err?'err':'';}
+async function handleFiles(files){
+  if(!files.length) return;
+  setStatus('Okunuyor…'); let added=0; const fails=[];
+  for(const f of files){
+    const n=f.name.toLowerCase();
+    try{
+      let raw;
+      if(n.endsWith('.pdf')||f.type==='application/pdf'){ if(!window.pdfjsLib) throw new Error('PDF okuyucu yüklenemedi'); raw=parseLines(await pdfLines(f)); }
+      else if(/\.xlsx?$/.test(n)){ if(!window.XLSX) throw new Error('Excel okuyucu yüklenemedi'); raw=await parseExcel(f); }
+      else raw=parseLines((await f.text()).split(/\r?\n/));
+      added+=addRaw(raw);
+    }catch(e){fails.push(f.name+': '+(e&&e.message||e));}
+  }
+  if(txs.length){setStatus(added+' işlem eklendi.'+(fails.length?' Okunamayan: '+fails.join(', '):''),!!fails.length);render();}
+  else if(fails.length) setStatus('Okunamadı: '+fails.join(', '),true);
+}
+$('#file').addEventListener('change',e=>{handleFiles([...e.target.files]);e.target.value='';});
+const drop=$('#drop');
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',e=>handleFiles([...e.dataTransfer.files]));
+$('#pasteToggle').onclick=()=>$('#pasteBox').classList.toggle('hidden');
+$('#pasteGo').onclick=()=>{const n=addRaw(parseLines($('#pasteText').value.split(/\r?\n/)));if(n){setStatus(n+' işlem eklendi.');$('#pasteText').value='';render();}};
+$('#addMore').onclick=()=>$('#inputPanel').scrollIntoView({behavior:'smooth'});
+$('#reset').onclick=()=>{txs=[];filterCat=null;$('#results').classList.add('hidden');setStatus('Ekstre verileri silindi. Öğrendiklerim duruyor.');};
+$('#search').addEventListener('input',renderTx);
+$('#clearFilter').onclick=()=>{filterCat=null;render();};
+$('#moreMerch').onclick=()=>{showAllMerch=!showAllMerch;render();};
+
+$('#demo').onclick=()=>{
+  const L=[
+   'Ekstre Dönemi 29/08/2026-26/09/2026',
+   '07/09/2026 OTOMATİK Ödemeniz için Teşekkürler 32,367.63(-)',
+   '28/04/2026 TRENDYOL.COM (18,035.99 TL) 6/5.taksit 3,009.83 3,009.83x1',
+   '10/05/2026 TRENDYOL.COM (10,365.00 TL) 9/5.taksit 1,151.66 1,151.66x4',
+   '10/05/2026 TRENDYOL.COM (2,599.99 TL) 9/5.taksit-iade 288.88(-) 288.88x4(-)',
+   '27/08/2026 PARATİ /TİKTAKKİRALA.CO ISTANBUL TR 278.00',
+   '29/08/2026 IYZICO/AmazonPrimeTR 69.90',
+   '29/08/2026 LEVNİ HOTEL İSTANBUL TR 4,850.00 14',
+   '29/08/2026 NESLİHAN ECZANESİ İSTANBUL TUR 312.40',
+   '29/08/2026 GOOGLE *YouTubePremium LONDON GBR 79.99',
+   '29/08/2026 FINDEKS FİNANSAL YONETIM 49.90',
+   '29/08/2026 MEŞHUR SARIYER BÖREKÇİSİİSTANBUL TR 235.00',
+   '29/08/2026 BLACK WHITE İSTANBUL TR 260.00',
+   '30/08/2026 TIME PROFESSOR SAATÇ İSTANBUL TR 400.00',
+   '30/08/2026 KOTON MAĞAZACILIK TEKS.SA (1,535.96 TL) 6/1.taksit 256.01 255.99x5',
+   '30/08/2026 BREKKIE İSTANBUL TR 1,730.00',
+   '30/08/2026 UBERTRENDYOLGOGETIRYEMEK 390.00 78',
+   '02/09/2026 MIGROS SANAL MARKET İSTANBUL TR 1,284.55',
+   '04/09/2026 SHELL ATAŞEHİR İSTANBUL TR 2,150.00',
+   '06/09/2026 ZARA İSTİNYE PARK İSTANBUL TR 3,199.00',
+   '09/09/2026 STARBUCKS MODA İSTANBUL TR 215.00',
+   '12/09/2026 BLACK WHITE İSTANBUL TR 340.00',
+   '15/09/2026 PARATİ /TİKTAKKİRALA.CO ISTANBUL TR 412.50',
+   '18/09/2026 ÇİYA SOFRASI KADIKÖY İSTANBUL TR 1,120.00',
+   '21/09/2026 KAHVECİ HACI BEKİR İSTANBUL TR 180.00',
+   '24/09/2026 PEGASUS HAVA TAŞIMACILIĞI İSTANBUL TR 2,840.00'
+  ];
+  txs=[];filterCat=null;const n=addRaw(parseLines(L));setStatus('Örnek veri: '+n+' işlem. Bazıları bilerek kategorisiz.');render();
+};
+
+/* ---------- Öğrenme paneli ---------- */
+function renderLearn(){
+  const n=Object.keys(learn.m).length;
+  $('#learnStats').textContent=n?`${n} yeri senin seçiminle tanıyorum.${learn.cats.length?' Senin eklediğin kategoriler: '+learn.cats.map(c=>c.n).join(', ')+'.':''} Hazır sözlükte ${BASE.reduce((s,c)=>s+c.k.length,0)} anahtar kelime var.`
+    :`Henüz senden bir şey öğrenmedim. Hazır sözlükte ${BASE.reduce((s,c)=>s+c.k.length,0)} anahtar kelime var; tanımadıklarımı sana soracağım.`;
+}
+$('#addCat').onclick=()=>{
+  const n=(prompt('Yeni kategori adı:')||'').trim(); if(!n) return;
+  if(catList().includes(n)){alert('Bu kategori zaten var.');return;}
+  learn.cats.push({n,c:PAL[learn.cats.length%PAL.length]}); saveLearn(); render(); renderLearn();
+};
+$('#backup').onclick=async()=>{
+  const j=JSON.stringify(learn);
+  $('#backupBox').classList.remove('hidden'); $('#restoreGo').classList.add('hidden');
+  $('#backupText').value=j;
+  let ok=false; try{await navigator.clipboard.writeText(j);ok=true;}catch(e){}
+  $('#backupNote').textContent=ok?'Yedek panoya kopyalandı. Notlar uygulamasına yapıştırıp saklayabilirsin. İçinde yalnızca yer adları ve kategoriler var, tutar yok.':'Aşağıdaki metni seçip kopyala ve sakla. İçinde yalnızca yer adları ve kategoriler var, tutar yok.';
+};
+$('#restoreToggle').onclick=()=>{
+  $('#backupBox').classList.remove('hidden'); $('#restoreGo').classList.remove('hidden');
+  $('#backupText').value=''; $('#backupNote').textContent='Daha önce aldığın yedeği buraya yapıştır. Mevcut öğrendiklerimin yerine geçer.';
+};
+$('#restoreGo').onclick=()=>{
+  try{const o=JSON.parse($('#backupText').value);if(!o||typeof o.m!=='object')throw 0;learn={m:o.m||{},t:o.t||{},cats:o.cats||[]};saveLearn();
+    $('#backupBox').classList.add('hidden');render();renderLearn();setStatus('Yedek yüklendi.');}
+  catch(e){$('#backupNote').textContent='Bu metin geçerli bir yedek değil. Yedekle düğmesiyle alınan metnin tamamını yapıştır.';}
+};
+$('#forget').onclick=()=>{if(confirm('Senden öğrendiğim tüm kategori seçimleri silinsin mi?')){learn={m:{},t:{},cats:[]};saveLearn();render();renderLearn();}};
+
+/* ---------- Görünüm ---------- */
+function opts(sel,withAuto){
+  return (withAuto?`<option value="">${sel?'Otomatiğe dön':'Kategori seç…'}</option>`:'')+catList().map(c=>`<option ${sel===c?'selected':''}>${esc(c)}</option>`).join('');
+}
+const SRC={user:'senin seçimin',dict:'sözlükten',model:'tahmin',none:'kategorisiz'};
+function bindSelects(root){
+  root.querySelectorAll('select[data-k]').forEach(s=>s.onchange=()=>setRule(s.dataset.k,s.dataset.d,s.value));
+  root.querySelectorAll('button[data-ok]').forEach(b=>b.onclick=()=>setRule(b.dataset.k,b.dataset.d,b.dataset.ok));
+}
+function merchAgg(){
+  const by={};
+  txs.forEach(t=>{if(t.type==='in')return;const o=by[t.key]=by[t.key]||{k:t.key,d:t.desc,v:0,n:0,ci:t.ci};o.v+=t.type==='refund'?-t.amount:t.amount;if(t.type==='out')o.n++;});
+  return Object.values(by).sort((a,b)=>b.v-a.v);
+}
+function render(){
+  renderLearn();
+  if(!txs.length){$('#results').classList.add('hidden');return;}
+  $('#results').classList.remove('hidden');
+  txs.forEach(t=>t.ci=classify(t));
+  const sp=txs.filter(t=>t.type!=='in');
+  const out=txs.filter(t=>t.type==='out'), ref=txs.filter(t=>t.type==='refund'), inc=txs.filter(t=>t.type==='in');
+  const sum=a=>a.reduce((s,t)=>s+t.amount,0);
+  const total=sum(out)-sum(ref);
+  const dates=txs.map(t=>t.date.getTime()); const min=new Date(Math.min(...dates)), max=new Date(Math.max(...dates));
+  const days=Math.max(1,Math.round((max-min)/864e5)+1);
+  $('#total').textContent=fmt0.format(total);
+  $('#range').textContent=dLong.format(min)+' – '+dLong.format(max)+' net harcama';
+  $('#sCount').textContent=out.length; $('#sRef').textContent=fmt0.format(sum(ref)); $('#sIn').textContent=fmt0.format(sum(inc));
+
+  // Kontrol paneli
+  const merch=merchAgg();
+  const none=merch.filter(m=>m.ci.src==='none'), guess=merch.filter(m=>m.ci.src==='model');
+  const known=merch.length-none.length;
+  const tp=$('#todoPanel');
+  if(none.length||guess.length){
+    tp.classList.remove('hidden');
+    $('#todoTitle').textContent=none.length?`${none.length} yeri tanımadım`:`${guess.length} tahminimi onayla`;
+    $('#prog').style.width=(merch.length?known/merch.length*100:0)+'%';
+    $('#progText').textContent=`${merch.length} yerin ${known} tanesini tanıyorum.`;
+    $('#todoList').innerHTML=[...none,...guess].slice(0,40).map(m=>`<div class="merch">
+      <span class="name">${esc(m.k)}</span><span class="num">${fmt0.format(m.v)}</span>
+      <span class="ctl">${m.ci.src==='model'
+        ?`<span class="badge model">tahmin: ${esc(m.ci.c)}</span><button class="small primary" data-ok="${esc(m.ci.c)}" data-k="${esc(m.k)}" data-d="${esc(m.d)}">Doğru</button><select data-k="${esc(m.k)}" data-d="${esc(m.d)}" aria-label="${esc(m.k)} kategorisi">${opts('',true).replace('Kategori seç…','Başka kategori…')}</select>`
+        :`<select data-k="${esc(m.k)}" data-d="${esc(m.d)}" aria-label="${esc(m.k)} kategorisi">${opts('',true)}</select><span class="note">${esc(m.d)}</span>`}</span></div>`).join('');
+    bindSelects($('#todoList'));
+  } else tp.classList.add('hidden');
+
+  // Kategoriler
+  const byCat={}; sp.forEach(t=>{byCat[t.ci.c]=(byCat[t.ci.c]||0)+(t.type==='refund'?-t.amount:t.amount);});
+  const cats=Object.entries(byCat).filter(e=>e[1]>0.005).sort((a,b)=>b[1]-a[1]);
+  $('#ribbon').innerHTML=cats.map(([n,v])=>`<div style="flex:${v};background:${catColor(n)}" title="${esc(n)}"></div>`).join('');
+  $('#legend').innerHTML=cats.map(([n,v])=>`<li data-c="${esc(n)}" class="${filterCat===n?'on':''}" tabindex="0" role="button" aria-pressed="${filterCat===n}">
+    <span class="dot" style="background:${catColor(n)}"></span><span>${esc(n)}</span>
+    <span class="pct num">${total>0?Math.round(v/total*100):0}%</span><span class="num">${fmt0.format(v)}</span></li>`).join('');
+  $('#legend').querySelectorAll('li').forEach(li=>{const f=()=>{filterCat=filterCat===li.dataset.c?null:li.dataset.c;render();};li.onclick=f;li.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();f();}};});
+
+  // Zaman grafiği
+  const monthly=days>62; const buckets=new Map();
+  if(monthly){for(let d=new Date(min.getFullYear(),min.getMonth(),1);d<=max;d=new Date(d.getFullYear(),d.getMonth()+1,1))buckets.set(d.getFullYear()+'-'+d.getMonth(),0);}
+  else{for(let i=0;i<days;i++){const d=new Date(min.getFullYear(),min.getMonth(),min.getDate()+i);buckets.set(d.toDateString(),0);}}
+  out.forEach(t=>{const k=monthly?t.date.getFullYear()+'-'+t.date.getMonth():t.date.toDateString();if(buckets.has(k))buckets.set(k,buckets.get(k)+t.amount);});
+  const vals=[...buckets.values()], peak=Math.max(1,...vals), keys=[...buckets.keys()];
+  $('#barsTitle').textContent=monthly?'Aylık harcama':'Günlük harcama';
+  const label=k=>monthly?new Intl.DateTimeFormat('tr-TR',{month:'short',year:'2-digit'}).format(new Date(+k.split('-')[0],+k.split('-')[1],1)):dShort.format(new Date(k));
+  $('#bars').innerHTML=vals.map((v,i)=>`<div style="height:${v/peak*100}%" title="${esc(label(keys[i]))}: ${fmt.format(v)}"></div>`).join('');
+  $('#axL').textContent=label(keys[0]); $('#axR').textContent=label(keys[keys.length-1]);
+
+  // Yerler
+  const list=showAllMerch?merch:merch.slice(0,20);
+  $('#merchants').innerHTML=list.map(m=>`<div class="merch">
+    <span class="name">${esc(m.k)}</span><span class="num">${fmt0.format(m.v)}</span>
+    <span class="ctl"><select data-k="${esc(m.k)}" data-d="${esc(m.d)}" aria-label="${esc(m.k)} kategorisi">${m.ci.src==='user'?opts(m.ci.c,true):(m.ci.src==='none'?opts('',true):`<option value="" selected>${esc(m.ci.c)}</option>`+catList().map(c=>`<option>${esc(c)}</option>`).join(''))}</select>
+    <span class="badge ${m.ci.src}">${SRC[m.ci.src]}</span><span class="note">${m.n} işlem</span></span></div>`).join('');
+  bindSelects($('#merchants'));
+  const mb=$('#moreMerch'); if(merch.length>20){mb.classList.remove('hidden');mb.textContent=showAllMerch?'Daha az göster':`Tümünü göster (${merch.length})`;}else mb.classList.add('hidden');
+
+  const cf=$('#clearFilter'); if(filterCat){cf.textContent=filterCat+' süzgecini kaldır';cf.classList.remove('hidden');}else cf.classList.add('hidden');
+  renderTx();
+}
+function renderTx(){
+  const q=fold($('#search').value.trim());
+  const list=txs.filter(t=>(!filterCat||(t.type!=='in'&&t.ci.c===filterCat))&&(!q||fold(t.desc).includes(q)));
+  const shown=list.slice(0,300);
+  const lab=t=>t.type==='in'?'Kart ödemesi':(t.type==='refund'?'İade · '+t.ci.c:t.ci.c+(t.inst?' · taksit':''));
+  $('#txList').innerHTML=shown.map(t=>`<div class="tx"><span class="d num">${dShort.format(t.date)}</span>
+    <span class="desc">${esc(t.desc)}<span class="c">${esc(lab(t))}</span></span>
+    <span class="num ${t.type!=='out'?'in':''}">${t.type==='out'?'':(t.type==='refund'?'−':'+')}${fmt.format(t.amount)}</span></div>`).join('')
+    +(list.length>shown.length?`<p class="note" style="margin-top:10px">İlk 300 işlem gösteriliyor (toplam ${list.length}). Aramayla daralt.</p>`:'')
+    +(!list.length?'<p class="note" style="margin-top:10px">Eşleşen işlem yok.</p>':'');
+}
+renderLearn();
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').then(()=>navigator.serviceWorker.ready).then(()=>{
+    $('#offlineNote').textContent=' İnternetsiz kullanıma hazır.';
+  }).catch(()=>{});
+}
+})();
+</script>
+</body>
+</html>
