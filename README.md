@@ -1,8 +1,10 @@
 # Ekstre Analiz
 
-Kredi kartı ekstresini (PDF, Excel, CSV) telefonda analiz eden, internetsiz çalışan web uygulaması.
+Kredi kartı ekstresini (PDF, Excel, CSV) ve banka uygulamasının ekran görüntülerini telefonda analiz eden, internetsiz çalışan web uygulaması.
 
 **Gizlilik:** Ekstre dosyaları yalnızca cihazda işlenir. Sayfa, tarayıcı seviyesinde tüm ağ isteklerini engeller (`connect-src 'none'`). Cihazda kalıcı tutulan tek şey "yer adı → kategori" eşleşmeleridir; tutar ve tarih saklanmaz.
+
+**Ekran görüntüleri:** Fotoğraflar cihazda Tesseract ile okunur (`ocr/` klasörü, ~8 MB). Bu dosyalar ilk fotoğraf okunurken bir kez indirilir, sonra önbellekte kalır; okunan görüntü hiçbir yere gönderilmez. Ekran görüntüleri Fotoğraflar'da (iCloud açıksa iCloud'da) kalmaya devam eder; işin bitince silebilirsin.
 
 ## Kurulum (GitHub Pages)
 

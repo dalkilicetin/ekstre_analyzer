@@ -94,6 +94,8 @@ select{font:inherit;font-size:.88rem;border:1px solid var(--line);border-radius:
 .tx .c{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px;font-size:.78rem;color:var(--muted)}
 .tx .c select{font-size:.8rem;padding:3px 6px}
 .tx .in{color:var(--in)}
+.tx.chk .num{color:var(--warn)}
+.fix{display:block;margin-top:4px;border-color:var(--warn);color:var(--warn)}
 .search{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg);color:var(--ink);font:inherit;margin-bottom:6px}
 .toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .filter-tag{font-size:.85rem;color:var(--accent);background:none;border:none;padding:4px 0}
@@ -109,10 +111,10 @@ select{font:inherit;font-size:.88rem;border:1px solid var(--line);border-radius:
   <section class="panel" id="inputPanel">
     <div class="drop" id="drop">
       <p><strong>Akbank ekstreni seç</strong></p>
-      <p class="note">PDF, Excel veya CSV. Birden fazla ay seçebilirsin; tekrar eden işlemler bir kez sayılır.</p>
+      <p class="note">PDF, Excel, CSV ya da banka uygulamasının ekran görüntüleri. Birden fazla dosya seçebilirsin; tekrar eden işlemler bir kez sayılır.</p>
       <div class="row">
         <label class="btn primary" for="file">Dosya seç</label>
-        <input id="file" type="file" accept=".pdf,.xls,.xlsx,.csv,.txt,application/pdf" multiple hidden>
+        <input id="file" type="file" accept=".pdf,.xls,.xlsx,.csv,.txt,application/pdf,image/*" multiple hidden>
         <button id="pasteToggle">Metin yapıştır</button>
         <button id="demo">Örnekle dene</button>
       </div>
@@ -369,13 +371,17 @@ const TL_AMT=/([+\-−–]?)\s?(\d{1,3}(?:\.\d{3})*,\d{2})\s*(?:TL|₺)$/;
 function looksCardList(lines){
   return lines.filter(l=>DATE_ONLY.test(l.trim())).length>=1&&lines.filter(l=>TL_AMT.test(l.trim())).length>=1;
 }
+const recKey=r=>r.date.getTime()+'|'+r.desc+'|'+r.amt;
+// A'nın son m kaydı B'nin ilk m kaydıyla aynıysa en büyük m.
+function overlap(A,B){for(let m=Math.min(A.length,B.length);m>0;m--){if(B.slice(0,m).every((r,i)=>recKey(r)===recKey(A[A.length-m+i])))return m;}return 0;}
 function parseCardList(text){
-  const out=[];out.period=null; let prev=[];
+  const out=[];out.period=null; const prev=[];
   for(const chunk of text.split(/^\s*={3,}\s*$/m)){
     const recs=[]; let cur=null;
     const done=()=>{if(cur&&cur.amt!=null&&cur.date)recs.push(cur);cur=null;};
     for(let line of chunk.split(/\r?\n/)){
       line=line.replace(/\s+/g,' ').trim();
+      if(line==='#KONTROL'){if(cur)cur.check=true;continue;}
       if(!fold(line).replace(CARD_NOISE,'').trim()||/^\d{1,2}:\d{2}$|^\d{1,5}$/.test(line)) continue;
       const d=line.match(DATE_ONLY);
       if(d){if(cur&&!cur.date){cur.date=new Date(+d[3],+d[2]-1,+d[1]);if(d[4]){cur.inst=true;cur.k=+d[4];cur.rem=Math.max(0,+d[5]-+d[4]);}}continue;}
@@ -384,15 +390,65 @@ function parseCardList(text){
       if(a&&cur&&cur.amt==null){const v=parseFloat(a[2].replace(/\./g,'').replace(',','.'));cur.amt=a[1]?-v:v;}
     }
     done();
-    // Art arda görüntüler çakışır: önceki görüntünün sonu bu görüntünün başıyla aynıysa o kısmı at.
-    const k=r=>r.date.getTime()+'|'+r.desc+'|'+r.amt;
-    let skip=0;
-    for(let m=Math.min(prev.length,recs.length);m>0;m--){if(recs.slice(0,m).every((r,i)=>k(r)===k(prev[prev.length-m+i]))){skip=m;break;}}
-    recs.slice(skip).forEach(r=>out.push({date:r.date,desc:r.desc,amt:r.amt,credit:r.amt<0,inst:!!r.inst,rem:r.rem!=null?{amt:Math.abs(r.amt),n:r.rem,k:r.k}:null}));
-    if(recs.length) prev=recs;
+    // Art arda görüntüler çakışır: başka bir görüntünün sonuyla aynı olan baş kısmı ve
+    // başıyla aynı olan son kısmı at (görüntüler hangi sırayla seçilirse seçilsin).
+    let head=0,tail=0;
+    for(const P of prev){head=Math.max(head,overlap(P,recs));tail=Math.max(tail,overlap(recs,P));}
+    recs.slice(head,Math.max(head,recs.length-tail)).forEach(r=>out.push({date:r.date,desc:r.desc,amt:r.amt,credit:r.amt<0,inst:!!r.inst,check:!!r.check,rem:r.rem!=null?{amt:Math.abs(r.amt),n:r.rem,k:r.k}:null}));
+    if(recs.length) prev.push(recs);
   }
   out.card=true;
   return out;
+}
+
+/* ---------- Ekran görüntüsünden okuma (Tesseract, cihazda) ----------
+   Dosyalar ocr/ klasöründen ilk kullanımda yüklenir, sonra çevrimdışı önbellekte durur. */
+let ocrW=null;
+const SIMD_TEST=new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11]);
+function loadScript(src){return new Promise((ok,no)=>{const e=document.createElement('script');e.src=src;e.onload=ok;e.onerror=()=>no(new Error('fotoğraf okuyucu yüklenemedi; ilk kullanımda internet açık olmalı'));document.head.appendChild(e);});}
+async function ocrWorker(){
+  if(ocrW) return ocrW;
+  if(!window.WebAssembly||!WebAssembly.validate(SIMD_TEST)) throw new Error('bu cihaz fotoğraf okumayı desteklemiyor (iOS 16.4 veya üstü gerekir)');
+  if(!window.Tesseract) await loadScript('ocr/tesseract.min.js');
+  ocrW=await Tesseract.createWorker('tur',1,{workerPath:'ocr/worker.min.js',corePath:'ocr/tesseract-core-simd-lstm.wasm.js',langPath:'ocr',gzip:false,workerBlobURL:false,cacheMethod:'none'});
+  return ocrW;
+}
+function ocrCanvas(img,sx,sy,sw,sh,scale,bin){
+  const c=document.createElement('canvas');c.width=Math.round(sw*scale);c.height=Math.round(sh*scale);
+  const x=c.getContext('2d');x.imageSmoothingQuality='high';x.drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);
+  const d=x.getImageData(0,0,c.width,c.height),p=d.data;
+  for(let i=0;i<p.length;i+=4){const g=.299*p[i]+.587*p[i+1]+.114*p[i+2],v=bin?(g<170?0:255):g;p[i]=p[i+1]=p[i+2]=v;}
+  x.putImageData(d,0,0);return c;
+}
+// Ekrandaki tutar her zaman kuruşlu ("1.234,56 TL"): rakamların son ikisi kuruştur. Sonuç kuruş cinsinden.
+function ocrCents(t){const m=[...String(t).matchAll(/(-?)\s*(\d{1,3}(?:[.,]\d{3})*[.,]?\d{2})\s*TL/g)].pop();if(!m)return null;const c=+m[2].replace(/\D/g,'');return m[1]?-c:c;}
+const fmtCents=c=>(c<0?'-':'')+String(Math.floor(Math.abs(c)/100)).replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+String(Math.abs(c)%100).padStart(2,'0');
+async function ocrImage(file,W){
+  const url=URL.createObjectURL(file), img=new Image(); img.src=url;
+  try{await img.decode();}finally{URL.revokeObjectURL(url);}
+  const r=await W.recognize(ocrCanvas(img,0,0,img.naturalWidth,img.naturalHeight,2,true),{},{blocks:true,text:true});
+  const lines=(r.data.blocks||[]).flatMap(b=>b.paragraphs.flatMap(p=>p.lines));
+  const out=[], jobs=[];
+  for(const L of lines){
+    const t=L.text.replace(/\s+/g,' ').trim(); if(!t) continue;
+    const d=t.match(/^(\d{2})\D?(\d{2})\D?(\d{4})(.*)$/);
+    if(d&&+d[2]>=1&&+d[2]<=12){const tk=d[4].match(/Taksit:?\s*(\d{1,2})\s*\/\s*(\d{1,2})/i);out.push(`${d[1]}.${d[2]}.${d[3]}`+(tk?` - Taksit: ${tk[1]}/${tk[2]}`:''));continue;}
+    if(/[A-Za-zÇĞİÖŞÜçğıöşü]{3}/.test(t)&&/\d\s*TL\S{0,3}$/.test(t)){const j={L,t,i:out.length};jobs.push(j);out.push(null);continue;}
+    out.push(t);
+  }
+  // Tutarı ikinci kez, yalnız tutar bölgesini büyüterek ve yalnız rakam tanıyarak oku; iki okuma uyuşmazsa işaretle.
+  if(jobs.length){
+    await W.setParameters({tessedit_char_whitelist:'0123456789.,-TL',tessedit_pageseg_mode:'7'});
+    try{
+      for(const j of jobs){
+        const b=j.L.bbox, x0=img.naturalWidth*0.55, y0=Math.max(0,b.y0/2-6), h=Math.min(img.naturalHeight-y0,(b.y1-b.y0)/2+12);
+        const a=ocrCents(j.t), c=ocrCents((await W.recognize(ocrCanvas(img,x0,y0,img.naturalWidth-x0,h,3,false))).data.text);
+        let v=c!=null?c:a; if(v!=null&&a!=null&&a<0&&v>0)v=-v;
+        out[j.i]=j.t.replace(/[\s(o]*-?[\d.,]{2,}\s*TL.*$/,'').trim()+(v!=null?`\n${fmtCents(v)} TL`+(a!==v?'\n#KONTROL':''):'');
+      }
+    }finally{await W.setParameters({tessedit_char_whitelist:'',tessedit_pageseg_mode:'6'});}
+  }
+  return out.join('\n');
 }
 
 async function pdfLines(file){
@@ -479,7 +535,7 @@ function addRaw(raw){
     // "Fatura ödeme" gibi borç satırları harcamadır; kart ödemesi yalnızca alacak (-) satırıdır.
     else if(r.credit||r.amt<0) type=(PAY_RE.test(f)&&!REFUND_RE.test(f))?'in':'refund';
     else type=/TESEKKUR/.test(f)?'in':'out';
-    txs.push({id,date,desc:r.desc,amount:Math.abs(r.amt),type,inst,key:merchantKey(r.desc),rem:r.rem||null,stmt:raw.periodEnd?raw.periodEnd.getTime():0,card:!!raw.card});
+    txs.push({id,date,desc:r.desc,amount:Math.abs(r.amt),type,inst,key:merchantKey(r.desc),rem:r.rem||null,stmt:raw.periodEnd?raw.periodEnd.getTime():0,card:!!raw.card,check:!!r.check});
     added++;
   }
   txs.sort((a,b)=>b.date-a.date);
@@ -491,6 +547,16 @@ function setStatus(msg,err){const s=$('#status');s.textContent=msg;s.className=e
 async function handleFiles(files){
   if(!files.length) return;
   setStatus('Okunuyor…'); let added=0; const fails=[]; let unread=null;
+  const isImg=f=>/^image\//.test(f.type)||/\.(png|jpe?g|heic|webp)$/i.test(f.name);
+  const imgs=files.filter(isImg); files=files.filter(f=>!isImg(f));
+  if(imgs.length){
+    try{
+      const W=await ocrWorker(), chunks=[];
+      for(let i=0;i<imgs.length;i++){setStatus(`Fotoğraf okunuyor ${i+1}/${imgs.length}…`);chunks.push(await ocrImage(imgs[i],W));}
+      const text=chunks.join('\n=====\n'), raw=parseCardList(text);
+      if(raw.length) added+=addRaw(raw); else unread=text.split('\n');
+    }catch(e){fails.push('fotoğraflar: '+(e&&e.message||e));}
+  }
   for(const f of files){
     const n=f.name.toLowerCase();
     try{
@@ -511,7 +577,7 @@ async function handleFiles(files){
   if(!added&&unread){
     if(!unread.join('').trim()){setStatus('PDF\'te okunabilir metin yok; taranmış görüntü olabilir. İşlem satırlarını kopyalayıp "Metin yapıştır" ile dene.',true);return;}
     $('#pasteText').value=unread.join('\n'); $('#pasteBox').classList.remove('hidden');
-    setStatus('PDF okundu ama işlem satırlarını tanıyamadım. Okunan metni aşağıdaki kutuya koydum: işlem satırlarını "GG/AA/YYYY açıklama tutar" biçimine getirip "Analiz et"e bas.',true);
+    setStatus('Dosya okundu ama işlem satırlarını tanıyamadım. Okunan metni aşağıdaki kutuya koydum: işlem satırlarını "GG/AA/YYYY açıklama tutar" biçimine getirip "Analiz et"e bas.',true);
   }
 }
 $('#file').addEventListener('change',e=>{handleFiles([...e.target.files]);e.target.value='';});
@@ -673,12 +739,19 @@ function renderTx(){
   const list=txs.filter(t=>(!filterCat||(t.type!=='in'&&t.ci.c===filterCat))&&(!q||fold(t.desc).includes(q)));
   const shown=list.slice(0,300);
   const ctl=t=>t.type==='in'?'Kart ödemesi':catSelect(t)+`<span class="badge ${t.ci.src}">${SRC[t.ci.src]}</span>`+(t.type==='refund'?'<span>iade</span>':'')+(t.inst?'<span>taksit</span>':'');
-  $('#txList').innerHTML=shown.map(t=>`<div class="tx"><span class="d num">${dShort.format(t.date)}</span>
+  $('#txList').innerHTML=shown.map(t=>`<div class="tx${t.check?' chk':''}"><span class="d num">${dShort.format(t.date)}</span>
     <span class="desc"><span class="t">${esc(t.desc)}</span><span class="c">${ctl(t)}</span></span>
-    <span class="num ${t.type!=='out'?'in':''}">${t.type==='out'?'':(t.type==='refund'?'−':'+')}${fmt.format(t.amount)}</span></div>`).join('')
+    <span class="num ${t.type!=='out'?'in':''}">${t.type==='out'?'':(t.type==='refund'?'−':'+')}${fmt.format(t.amount)}${t.check?`<button class="small fix" data-i="${txs.indexOf(t)}">tutarı kontrol et</button>`:''}</span></div>`).join('')
     +(list.length>shown.length?`<p class="note" style="margin-top:10px">İlk 300 işlem gösteriliyor (toplam ${list.length}). Aramayla daralt.</p>`:'')
     +(!list.length?'<p class="note" style="margin-top:10px">Eşleşen işlem yok.</p>':'');
   bindSelects($('#txList'));
+  // Fotoğraftan okunan ve iki okumanın uyuşmadığı tutar: kullanıcı ekran görüntüsüne bakıp düzeltir.
+  $('#txList').querySelectorAll('button.fix').forEach(b=>b.onclick=()=>{
+    const t=txs[+b.dataset.i]; if(!t) return;
+    const v=prompt(`${t.desc}\nEkran görüntüsündeki tutarı yaz (ör. 1.234,56):`,fmtCents(Math.round(t.amount*100)).replace('-',''));
+    if(v===null) return; const c=ocrCents(v.trim()+' TL'); if(c==null){alert('Tutar anlaşılamadı. Örnek: 1.234,56');return;}
+    t.amount=Math.abs(c)/100; t.check=false; render();
+  });
 }
 renderLearn();
 if('serviceWorker' in navigator){

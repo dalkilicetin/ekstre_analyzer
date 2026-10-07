@@ -1,6 +1,8 @@
 // Ekstre Analiz – çevrimdışı önbellek.
 // index.html'i ya da başka bir dosyayı güncellediğinde aşağıdaki sürümü bir artır (v2, v3...).
-const VERSION = 'ekstre-v6';
+const VERSION = 'ekstre-v7';
+// Fotoğraf okuyucu dosyaları (~8 MB) ilk kullanımda indirilir ve sürüm değişse de silinmez.
+const OCR_CACHE = 'ekstre-ocr-v1';
 const FILES = [
   './',
   'index.html',
@@ -20,7 +22,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== OCR_CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -28,6 +30,13 @@ self.addEventListener('activate', e => {
 // Önce önbellek: sayfa hiç internete gitmeden açılır.
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  if (new URL(e.request.url).pathname.includes('/ocr/')) {
+    e.respondWith(caches.open(OCR_CACHE).then(c => c.match(e.request).then(hit => hit || fetch(e.request).then(res => {
+      if (res.ok) c.put(e.request, res.clone());
+      return res;
+    }))));
+    return;
+  }
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then(hit => {
       if (hit) return hit;
