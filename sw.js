@@ -1,6 +1,6 @@
 // Ekstre Analiz – çevrimdışı önbellek.
 // index.html'i ya da başka bir dosyayı güncellediğinde aşağıdaki sürümü bir artır (v2, v3...).
-const VERSION = 'ekstre-v3';
+const VERSION = 'ekstre-v4';
 const FILES = [
   './',
   'index.html',
